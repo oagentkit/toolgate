@@ -107,8 +107,9 @@ func (e *DenyError) Error() string {
 
 // Unwrap 让 errors.Is 同时能命中「归口错误」与「原始错误」。
 //
-// 归口错误（ErrStageFailed）与原始错误都要能命中：调用方一要分清
-// 「策略拒绝」与「门禁自己坏了」（处置不同），二要能顺着链路挖到根因。
+// 归口错误（ErrStageFailed、ErrEmptyName）与原始错误都要能命中：调用方一要分清
+// 「策略拒绝」与「门禁自己坏了」（处置不同），二要能顺着链路挖到根因，
+// 三要能分清「压根没有可判定的对象」（空名）与「某环拒了我」。
 func (e *DenyError) Unwrap() []error {
 	if e.Stage == stageInternal {
 		if e.Cause != nil {
@@ -127,6 +128,8 @@ const (
 	stagePrecondition = "precondition"
 	// stageInternal 阶段自身报错 / panic 的归口环节名。
 	stageInternal = "internal"
+	// stageNil 环节根本没装配上（nil）时在留痕里的名字。
+	stageNil = "nil"
 )
 
 // Retryable 判断一个错误是否值得重试。
@@ -215,6 +218,84 @@ func (c *Chain) Stages() []string {
 	return out
 }
 
+// EvaluateStages 按序求值判定环：全部通过返回 nil；任一环拒绝、或环自身出错
+// （返回 error 或 panic），返回归口后的 *DenyError。
+//
+// 它存在的唯一理由是让**环语义只有一份**。Chain.Do 与任何「执行体不归自己管」的
+// 调用方都调它，而不是各自再排一遍环。典型场景是程序化编排：模型写的一段代码在
+// 沙箱里跑，代码里的 host.<tool>() 调宿主工具——那种执行体必须跑在沙箱绑定闭包里
+// （写回预算记账、追加调用账目、打断 VM），压根没法交给 Chain.Do，于是最容易
+// 长出一份「自己排的环」。
+//
+// 复制一份环的代价不是代码重复，是**漂移**：环 panic 与环报错的归口环节名
+// （stageInternal）和 Cause 都是包内未导出常量，下游既不能引用也不能可靠复制
+// （硬编码字符串等于与实现耦合），一旦漏掉，「这环自己崩了」就会被谎报成
+// 「这环正常拒绝了」——调用方于是去修策略，而真正该修的是守卫代码。
+//
+// 不持有执行体，因此不构成绕过链的出口：绕过需要 Handler，而 Handler 只有
+// NewChain 内部拿得到，Chain 也不提供取回方法。返回类型只有 error，
+// 环节与执行体都出不来。
+//
+// 空工具名同样按拒绝处理，与 Chain.Do 一致：空名没有可判定的对象，
+// 门禁不该对它乐观放行。
+func EvaluateStages(ctx context.Context, stages []Stage, call Call) error {
+	_, err := evaluateStages(ctx, stages, call)
+	return err
+}
+
+// evaluateStages 环求值本体：同时给出分环留痕与收口错误。
+//
+// 留痕与结论必须同源：分环耗时与判定结果只在这一处测一次。拆成两处就得让某一处
+// 重跑一遍环来补数据——对着有副作用的环（计费、配额、留痕）重跑，等于把一次
+// 调用判成两次，正是 Record「任何结局都恰好一条」要防的事。
+func evaluateStages(ctx context.Context, stages []Stage, call Call) ([]StageResult, error) {
+	// 链前校验：空名无法定位与审计，门禁不对空名乐观放行。
+	// Cause 挂上 ErrEmptyName，是为了让「压根没有可判定的对象」也能被 errors.Is 认出来，
+	// 否则调用方只能靠比对 Reason 文本——那正是本包要消灭的判定方式。
+	if call.Name == "" {
+		reason := ErrEmptyName.Error()
+		return []StageResult{{Stage: stagePrecondition, Reason: reason}},
+			&DenyError{
+				Stage: stagePrecondition, Tool: call.Name, Reason: reason, Cause: ErrEmptyName,
+			}
+	}
+
+	var trace []StageResult
+	for _, s := range stages {
+		// 环节名先取：环报错/panic 之后仍要能说出「是哪一环」，
+		// 而取名本身对 nil 环节会 panic（见 stageName）。
+		name := stageName(s)
+		st := time.Now()
+		v, err := runStage(ctx, s, call)
+		elapsed := time.Since(st)
+		if err != nil {
+			trace = append(trace, StageResult{Stage: name, Reason: err.Error(), Duration: elapsed})
+			return trace, err
+		}
+		trace = append(trace, StageResult{
+			Stage: name, Allow: v.Allow, Reason: v.Reason, Duration: elapsed,
+		})
+		if !v.Allow {
+			return trace, &DenyError{
+				Stage: name, Tool: call.Name, Reason: v.Reason, Retryable: v.Retryable,
+			}
+		}
+	}
+	return trace, nil
+}
+
+// stageName 取环节名，对 nil 环节兜底。
+//
+// nil 环节不是「没有这一环」，而是一环装配漏了：跳过它等于把一次故障静默降级成
+// 不设防；而直接调 s.Name() 又会在 runStage 的 recover **之外**再 panic 一次——
+// 一次接线失误升级成编排进程猝死，正是本包 doc 承诺不发生的事。
+func stageName(s Stage) string {
+	if s == nil {
+		return stageNil
+	}
+	return s.Name()
+}
+
 // Do 执行一次调用：逐环判定，全部通过才到达执行体。
 //
 // 无论结局如何都恰好产出一次留痕。返回的 error 在拒绝时是 *DenyError，
@@ -232,35 +313,11 @@ func (c *Chain) Do(ctx context.Context, call Call) (res Result, err error) {
 		}
 	}()
 
-	// 链前校验：空名无法定位与审计，门禁不对空名乐观放行。
-	if call.Name == "" {
-		rec.Stages = append(rec.Stages, StageResult{
-			Stage:  stagePrecondition,
-			Reason: ErrEmptyName.Error(),
-		})
-		return Result{}, &DenyError{
-			Stage: stagePrecondition, Tool: call.Name, Reason: ErrEmptyName.Error(),
-		}
-	}
-
-	for _, s := range c.stages {
-		st := time.Now()
-		v, err := runStage(ctx, s, call)
-		elapsed := time.Since(st)
-		if err != nil {
-			rec.Stages = append(rec.Stages, StageResult{
-				Stage: s.Name(), Reason: err.Error(), Duration: elapsed,
-			})
-			return Result{}, err
-		}
-		rec.Stages = append(rec.Stages, StageResult{
-			Stage: s.Name(), Allow: v.Allow, Reason: v.Reason, Duration: elapsed,
-		})
-		if !v.Allow {
-			return Result{}, &DenyError{
-				Stage: s.Name(), Tool: call.Name, Reason: v.Reason, Retryable: v.Retryable,
-			}
-		}
+	// 环判定与「程序内调用」共用同一份语义（见 EvaluateStages）：
+	// 链自己不再持有一份环循环，就没有两份可以漂移。
+	rec.Stages, err = evaluateStages(ctx, c.stages, call)
+	if err != nil {
+		return Result{}, err
 	}
 
 	res, err = runHandler(ctx, c.handler, call)
