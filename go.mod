@@ -8,6 +8,7 @@ require (
 	github.com/cloudwego/eino v0.9.21
 	github.com/oagentkit/mcpkit v0.4.0
 	github.com/oekit/concurrency v0.16.0
+	github.com/oekit/pkg v0.14.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 
