@@ -13,8 +13,6 @@ invoke 的包文档自证「刻意不携带任何框架类型：本包与 policy
 policy 改为依赖 guardx/invoke（tier2 → tier0，方向合法，无环）。
 关联 oagentkit/guardx#3
 
-- 文档(changelog)：补 CHANGELOG.md（从 git 历史生成）
-
 ## [v0.11.0] — 2026-10-19
 
 - 杂务(deps)：依赖地板对齐远端最新（mcpkit v0.8.0 / runtime v0.7.0） (13)
