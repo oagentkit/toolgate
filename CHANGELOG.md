@@ -2,6 +2,19 @@
 
 > 本文件由 `matrix-tools/scripts/gen_changelogs.py` 从 git 历史生成，按 tag 切段、取每段内的 conventional commit 渲染。
 
+## [v0.12.0] — 2026-10-19
+
+### 重构：invoke 迁出本仓 —— 框架无关的原语不该被 eino 重仓的地板拖住
+
+BREAKING CHANGE: github.com/oagentkit/toolgate/invoke → github.com/oagentkit/guardx/invoke
+invoke 的包文档自证「刻意不携带任何框架类型：本包与 policy/toolegate 无耦合」——
+它是框架无关的原语，自身 import 面只有 oekit/pkg/errors，却在带 eino 家族的重仓里
+让消费方白吃 34 个第三方模块。
+policy 改为依赖 guardx/invoke（tier2 → tier0，方向合法，无环）。
+关联 oagentkit/guardx#3
+
+- 文档(changelog)：补 CHANGELOG.md（从 git 历史生成）
+
 ## [v0.11.0] — 2026-10-19
 
 - 杂务(deps)：依赖地板对齐远端最新（mcpkit v0.8.0 / runtime v0.7.0） (13)
