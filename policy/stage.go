@@ -3,7 +3,7 @@ package policy
 import (
 	"context"
 
-	"github.com/oagentkit/toolgate/invoke"
+	"github.com/oagentkit/guardx/invoke"
 )
 
 // Stage 把操作审计门接成 invoke 链上的一环。

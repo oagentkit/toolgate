@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/oagentkit/toolgate/invoke"
+	"github.com/oagentkit/guardx/invoke"
 )
 
 // chainWith 把一个 stage 装进链，执行体恒成功且记录触达次数。
