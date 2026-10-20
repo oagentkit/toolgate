@@ -19,7 +19,7 @@ policy 改为依赖 guardx/invoke（tier2 → tier0，方向合法，无环）�
 
 ## [v0.10.0] — 2026-10-19
 
-- 杂务(deps)：依赖地板对齐远端最新（mcpkit v0.6.0 / runtime v0.6.0 / pkg v0.15.1 / concurrency v0.17.1） (#10)
+- 杂务(deps)：依赖地板对齐远端最新（mcpkit v0.6.0 / runtime v0.6.0 / pkg v0.15.1 / concurrency v0.17.1）
 
 ## [v0.9.0] — 2026-10-19
 
@@ -137,11 +137,11 @@ recover 转错误（工具执行一旦搬出主流程，宿主进程里的 recov
 矩阵内依赖：mcpkit。外部地板 eino + yaml.v3。
 门禁：go build / go vet / go test -race 全绿，gofmt 干净。
 
-- 杂务(deps)：依赖地板升到「历史最新 + 0.1.0」 (#5)
-- 杂务(deps)：跟进最新 tag (#4)
-- 杂务(deps)：oekit 依赖升级 (#3)
-- 杂务(deps)：mcpkit v0.2.1 → v0.3.0（本轮新发 tag 的连锁升级） (#2)
-- 杂务(deps)：跨仓依赖升级 (#1)
+- 杂务(deps)：依赖地板升到「历史最新 + 0.1.0」
+- 杂务(deps)：跟进最新 tag
+- 杂务(deps)：oekit 依赖升级
+- 杂务(deps)：mcpkit v0.2.1 → v0.3.0（本轮新发 tag 的连锁升级）
+- 杂务(deps)：跨仓依赖升级
 - 杂务(deps)：oekit/concurrency v0.12.0 -> v0.13.1
 - 杂务(deps)：oekit 三模块升至最新（pkg v0.13.0 / concurrency v0.12.0 / logx v0.7.0）
 - 杂务(deps)：oekit/concurrency v0.6.0 -> v0.9.0
