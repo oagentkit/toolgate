@@ -4,8 +4,9 @@
 
 ## [v0.12.2] — 2026-10-21
 
-- 杂务(deps)：依赖地板跟到矩阵本轮新版本——mcpkit v0.8.4 runtime v0.7.2
+- 杂务(deps)：依赖地板跟到矩阵本轮新版本（第二轮：消除打 tag 时刻的地板落后）
 
+* chore(deps): 依赖地板跟到矩阵本轮新版本——mcpkit v0.8.4 runtime v0.7.2
 ## 下游要做什么
 **`go mod tidy`**。地板抬高对下游是**隐式破坏性变更**：不跑就报
 `updates to go.mod needed`，且报错不提真正原因（**不是本仓的 API 变了**）。
@@ -27,6 +28,13 @@
 go build / vet / test -race   ✅
 gofmt -l .                    ✅ 空
 ```
+* docs(changelog): 重生成 CHANGELOG.md——补回浅克隆期间漏掉的条目
+上一版 tag（v0.12.1）的 CHANGELOG 段**漏了 5 条提交**：本地克隆是浅克隆
+（depth 限制），生成器遍历 tag 区间时看不到更早的提交，于是那几条被漏掉。
+本次重生成（本地已补齐完整历史）把 v0.12.1 段补回，并预写 v0.12.2 待发版段
+（依赖地板跟到 mcpkit v0.8.4、runtime v0.7.2）。
+**为什么必须修**：下游 `go get` 拿到的是 tag 快照——快照里的 CHANGELOG 若
+缺条目，发布说明就是残缺的（矩阵的 CHANGELOG 覆盖门禁正是查这个）。
 
 
 ## [v0.12.1] — 2026-10-21
