@@ -19,6 +19,7 @@ mcpkit/mcp.ErrorKind 判的是协议层事实，guardx/toolfail.Class 判的是�
 - TestFailureClassCoversEveryErrorKind 枚举 ErrorKind 的全部取值，缺映射当场红
   （新增协议层分类漏改映射表时兜住）。
 Closes oagentkit/mcpkit#17
+* docs(changelog): 预写 v0.12.3 待发版段
 
 ## [v0.12.2] — 2026-10-21
 
