@@ -2,6 +2,33 @@
 
 > 本文件由 `matrix-tools/scripts/gen_changelogs.py` 从 git 历史生成，按 tag 切段、取每段内的 conventional commit 渲染。
 
+## [v0.12.2] — 2026-10-21
+
+- 杂务(deps)：依赖地板跟到矩阵本轮新版本——mcpkit v0.8.4 runtime v0.7.2
+
+## 下游要做什么
+**`go mod tidy`**。地板抬高对下游是**隐式破坏性变更**：不跑就报
+`updates to go.mod needed`，且报错不提真正原因（**不是本仓的 API 变了**）。
+本仓**自身代码零改动**——只看本仓的 diff 看不出这是一次地板抬高。
+## 为什么抬
+上一版 tag 打出去时，它依赖的模块的**新版已经先发出**了——
+即「打 tag 那一刻地板就落后」。矩阵的「发版时刻地板时效」门禁
+（`verify_tag_floor.py --org oagentkit --latest-only`）当场报红：
+- github.com/oagentkit/mcpkit@v0.8.4
+- github.com/oagentkit/runtime@v0.7.2
+门禁给的修法是「抬 go.mod 地板 → go mod tidy → 重新发 tag」。
+本 PR 就是那条修法。
+## 为什么无行为差异
+被抬的这几个版本**自身也都是纯依赖地板追平**（各仓代码零改动，只抬
+`oekit/pkg` / `oekit/concurrency` / `guardx` / `llm` 四类地板之一），
+本仓用到的转发面与符号集一字未动。
+## 门禁
+```
+go build / vet / test -race   ✅
+gofmt -l .                    ✅ 空
+```
+
+
 ## [v0.12.1] — 2026-10-21
 
 - 杂务(deps)：依赖地板追平上游本轮新版本——oagentkit/guardx v0.13.1 oekit/concurrency v0.19.0 oekit/pkg v0.20.0
@@ -57,6 +84,80 @@ guardx v0.11.0 新增 sandbox/wire 跨进程调用协议，是**新增能力**�
 于是这一格欠账一直挂着。依赖地板报告器把「子仓发版让下游落后」显式化，
 但报告器恒不失败——真正的硬约束是「打 tag 时刻地板必须是当时的最新」。
 本地门禁：go mod tidy 无差异 / go build / go vet 通过。
+
+- 杂务(deps)：oagentkit/guardx 依赖地板抬到 v0.9.0
+
+guardx v0.9.0 新增了 toolfail 与 sandbox 两个 tier0 原语，
+是**新增能力**而非 API 变更——本仓无需改代码，只抬地板。
+为什么现在补：guardx v0.9.0 是 2026-10-21 发布的，本仓上一个 tag 早于它，
+于是这一格欠账一直挂着（依赖地板报告器把「子仓发版让下游落后」显式化，
+但报告器恒不失败——真正的硬约束是「打 tag 时刻地板必须是当时的最新」）。
+本地门禁：go mod tidy 无差异 / go build / go vet 通过。
+
+- 杂务(deps)：oagentkit/mcpkit 依赖地板抬到 v0.8.3
+
+* docs(AGENTS): 补「发版顺序」小节，指向 org CONTRIBUTING 单一副本
+13 个业务仓的 AGENTS.md 此前对发版顺序零覆盖（只有 textx 有个
+「### 版本与发版」标题，但里面只讲 SemVer 与 module 路径），
+发版顺序只写在 org 规则仓的 .github/CONTRIBUTING.md 里，单仓读者看不到。
+本次只加**指针 + 本仓相关提醒**，runbook 本体保持**单一副本**
+（CONTRIBUTING §发版），避免 13 份副本各自漂移。
+覆盖四条：
+- CHANGELOG.md 由 matrix-tools/scripts/gen_changelogs.py 从 git 历史生成，不要手改
+- tag 必须落在 CHANGELOG 提交之后（下游 go get 拿到的是 tag 快照）
+- 警告：无参重生成会吞掉待发版段，--next-version 是唯一能产出待发版段的开关
+- 本仓相关提醒（见正文）
+* chore(deps): oagentkit/mcpkit 依赖地板抬到 v0.8.3
+mcpkit v0.8.2 → v0.8.3 是**纯依赖地板抬升**（零 .go 改动，只动了 go.mod/go.sum
+与 CHANGELOG），本仓无需改代码。
+为什么现在补：矩阵的依赖地板是「会漂」的常态——任何一次子仓发版都会让下游落后。
+本仓的 mcpkit v0.8.3 是 2026-10-20 发布的，而本仓 v0.12.0 打 tag 在那之前，
+于是这一格欠账一直挂着。补齐它，本次全矩阵的第一方依赖地板达成零落后
+（此前唯一剩下的两处是 agent→llm 与 toolgate→mcpkit）。
+mcpkit v0.8.2 → v0.8.3 的内容：oekit 三个基座抬到 v0.18.0 +
+矩阵内跨仓依赖抬到各仓最新 tag，无 API 变更。
+本地门禁：go mod tidy 无差异 / go build / go vet 通过。
+
+- 杂务(deps)：oekit 依赖地板抬到 v0.18.0
+
+oekit 姊妹矩阵的依赖地板对齐到最新：
+- github.com/oekit/pkg        v0.17.0 → v0.18.0
+- github.com/oekit/concurrency v0.17.1 → v0.18.0
+- github.com/oekit/logx       已是最新 v0.7.1，不动
+oekit v0.18.0 的两个发布都是**纯增量**，无破坏性变更：
+- pkg：jsonrepair 补抽数组原语 ExtractArray；
+- concurrency：新增 `DoValue[T]`（带返回值的重试），`Do` 改为委托给它——
+  退避序列、抖动、MaxDelay 封顶、DelayHint 优先、Retryable 门控、ctx 取消
+  **只有一份实现**（此前这类调用方只能自己重写一遍退避，且常丢掉 DelayHint 语义）。
+依据 oagentkit/matrix-tools#44 的还债流程：依赖地板对齐到发版时刻的最新。
+本仓本轮不发 tag（不在发版集内），地板在 main 上就位，下次发版自然带上。
+
+
+- 文档(AGENTS)：补「发版顺序」小节，指向 org CONTRIBUTING 单一副本
+
+13 个业务仓的 AGENTS.md 此前对发版顺序零覆盖（只有 textx 有个
+「### 版本与发版」标题，但里面只讲 SemVer 与 module 路径），
+发版顺序只写在 org 规则仓的 .github/CONTRIBUTING.md 里，单仓读者看不到。
+本次只加**指针 + 本仓相关提醒**，runbook 本体保持**单一副本**
+（CONTRIBUTING §发版），避免 13 份副本各自漂移。
+覆盖四条：
+- CHANGELOG.md 由 matrix-tools/scripts/gen_changelogs.py 从 git 历史生成，不要手改
+- tag 必须落在 CHANGELOG 提交之后（下游 go get 拿到的是 tag 快照）
+- 警告：无参重生成会吞掉待发版段，--next-version 是唯一能产出待发版段的开关
+- 本仓相关提醒（见正文）
+
+- 文档(changelog)：按新生成器规则重生成 CHANGELOG.md
+
+生成器修复（oagentkit/matrix-tools#43）落地：
+① `[round-N] ` 前缀被剥离 → conventional commit 解析不再失效，
+   **commit body 保留**（此前整段被丢弃，发布说明只剩标题）；
+② 非 conventional 提交也保留 body；
+③ `--check` 识别「待发版段」（预写了但还没打 tag 的那段）。
+本 PR 恢复的是**本就在 commit body 里**的正文（迁移步骤、代码块、
+判据锚点）——此前被 `[round-N] ` 前缀导致的解析失败丢弃了。
+**没有任何发布说明内容被删除**：删除的行都能在新增行里找到对应
+（规范化掉 `(#N)` 与 `[round-N] ` 前缀后逐行比对）。
+关联：oagentkit/matrix-tools#43、oagentkit/matrix-tools#40
 
 
 ## [v0.12.0] — 2026-10-19
