@@ -6,7 +6,7 @@ toolchain go1.27.2
 
 require (
 	github.com/cloudwego/eino v0.9.21
-	github.com/oagentkit/mcpkit v0.8.4
+	github.com/oagentkit/mcpkit v0.8.5
 	github.com/oekit/concurrency v0.19.0
 	gopkg.in/yaml.v3 v3.0.1
 )
