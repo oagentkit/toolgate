@@ -59,6 +59,11 @@ tag 必须落在 CHANGELOG 提交**之后** —— 下游 `go get` 拿到的是 
 
 ## 仓特有纪律
 
+- **失败分类的映射只有一份，在 `policy` 包里**（`FailureClass` / `Disposition`）：
+  协议层 `mcpkit/mcp.ErrorKind` → 处置层 `guardx/toolfail.Class`。**下游不得各写各的映射表**——
+  同一类失败在 A 处判成「可重试」、在 B 处判成「永久拒绝」，重试策略随之瞎掉。
+  两层结论不一致时取**不可重试**的一侧（误判可重试会把一次失败放大成 N 次）。
+  新增 `ErrorKind` 必须同时补映射表与用例——`TestFailureClassCoversEveryErrorKind` 会当场红。
 - 优先级三层约束是**收紧**语义：上层只能进一步限制，**不得放宽**下层已设的限制。
 - 并发调度的去重键必须包含全部影响结果的参数，否则会错误合并不等价调用。
 - **新增门禁一律加在 `invoke` 链上，不要再加装饰器。**（`invoke` 已迁至
