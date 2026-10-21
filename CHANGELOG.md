@@ -2,6 +2,63 @@
 
 > 本文件由 `matrix-tools/scripts/gen_changelogs.py` 从 git 历史生成，按 tag 切段、取每段内的 conventional commit 渲染。
 
+## [v0.12.1] — 2026-10-21
+
+- 杂务(deps)：依赖地板追平上游本轮新版本——oagentkit/guardx v0.13.1 oekit/concurrency v0.19.0 oekit/pkg v0.20.0
+
+## 下游要做什么
+**`go mod tidy`**。地板抬高对下游是隐式 breaking：不跑就报
+`updates to go.mod needed`，且报错不提真正原因（**不是本仓的 API 变了**）。
+本仓**自身代码零改动**——只看本仓的 diff 看不出这是一次地板抬高。
+## 抬了哪几块、为什么无行为差异
+**`github.com/oagentkit/guardx` v0.13.0 → v0.13.1**
+上游 diff 只有 `go.mod` / `go.sum` / `CHANGELOG.md`——**没有 Go 源码变更**
+（内容是它自己把 `oekit/pkg` 地板抬到 v0.20.0）。本仓用到的包与转发面一字未动。
+**`github.com/oekit/concurrency` v0.18.0 → v0.19.0**
+上游 diff 只动了 2 个包：
+- `retry`：**抖动 panic 修复**——`rand.Int63n` 的契约是 n > 0，而「退避幅度为 0」
+  是生产可达路径（cfg.Delay=0 / DelayHint 返回 0 / float64→int64 溢出成负数），
+  旧实现在这些路径上直接 panic。改为钳到 [0, MaxInt64]。
+- `syncx`：新增全局在飞闸门原语（`Gate`）+ 说明同步。
+**`breaker` 与 `async` 两个包一字未动。**
+**本仓实际 import 的 `oekit/concurrency` 子包：async **
+与上游改动相交的：**（无）**
+**`github.com/oekit/pkg` v0.18.0 → v0.20.0**
+上游 diff 只动了 5 个包：
+- `errors`：**纯增量**——新增 `Errorf`（格式化 + `%w` 包装，nil-safe）。
+  `New`/`As`/`Is`/`Unwrap`/`Wrap` 是同型透传，一字未动。
+- `httpjson`：**退避溢出修复**——旧写法 `base << (attempt-1)` 在 attempt 较大时
+  int64 溢出成负数，负数绕过 `MaxDelay` 封顶，`time.After(负数)` 立刻返回
+  ⇒ **该轮退避彻底消失**。改为乘法 + 饱和封顶。正常 attempt 数（1..20）下
+  结果**逐字相同**，差别只在溢出的病态路径。
+- `urlguard`：**纯增量**——新增 `WithExactHosts`，未设置时行为与既有完全一致。
+- `stringx`：**仅注释**（补 `TruncEllipsis` 的 n 语义说明）。
+- `pathx`：新增包（`SanitizeRel` 等）。
+**本仓实际 import 的 `oekit/pkg` 子包：（本仓未直接 import oekit/pkg 的任何子包）**
+与上游改动相交的：**（无）**
+## 门禁
+```
+go build / vet / test -race   ✅
+gofmt -l .                    ✅ 空
+```
+
+- 杂务(deps)：guardx 依赖地板抬到 v0.13.0
+
+本仓只用 guardx 的既有包（invoke），而它在 v0.11.0 → v0.13.0 之间**未变**
+（那几版只加了 sandbox 的 Capable 与 wire）——故这是纯地板追平，无行为差异。
+矩阵的依赖地板时效门禁（verify_dep_floors.py）会把「地板落后远端最新」报出来。
+门禁自检：go build / vet / test ✅，gofmt ✅，go mod tidy ✅
+
+- 杂务(deps)：oagentkit/guardx 依赖地板抬到 v0.11.0
+
+guardx v0.11.0 新增 sandbox/wire 跨进程调用协议，是**新增能力**而非 API 变更——
+本仓无需改代码，只抬地板。
+为什么现在补：guardx v0.11.0 是本轮刚发布的，本仓上一个 tag 早于它，
+于是这一格欠账一直挂着。依赖地板报告器把「子仓发版让下游落后」显式化，
+但报告器恒不失败——真正的硬约束是「打 tag 时刻地板必须是当时的最新」。
+本地门禁：go mod tidy 无差异 / go build / go vet 通过。
+
+
 ## [v0.12.0] — 2026-10-19
 
 ### 重构：invoke 迁出本仓 —— 框架无关的原语不该被 eino 重仓的地板拖住
