@@ -10,7 +10,7 @@ go get github.com/oagentkit/toolgate
 |---|---|
 | `toolprior` | 工具优先级三层约束（收紧语义，下层已设的限制不得放宽） |
 | `toolsched` | 注解驱动的工具并发调度与去重 |
-| `policy` | 操作审计门：敏感工具调用的策略判定 |
+| `policy` | 操作审计门：敏感工具调用的策略判定；协议层失败分类 → 处置层类别的机械映射（`mcpkit` 的 `ErrorKind` → `guardx/toolfail` 的 `Class`） |
 
 ## 定位
 

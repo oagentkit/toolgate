@@ -2,6 +2,24 @@
 
 > 本文件由 `matrix-tools/scripts/gen_changelogs.py` 从 git 历史生成，按 tag 切段、取每段内的 conventional commit 渲染。
 
+## [v0.12.3] — 2026-10-21
+
+### 新增(policy)：协议层失败分类 → 处置层类别的机械映射
+
+mcpkit/mcp.ErrorKind 判的是协议层事实，guardx/toolfail.Class 判的是处置层语义，
+两者是同一件事的两个问题。本仓是矩阵里唯一同时依赖 mcpkit 与 guardx 的仓，
+两边的原语在此会合，故映射表落在这里——散在各调用点手写必然漂移。
+- FailureClass(kind)：ErrorKind → toolfail.Class 的单源映射表；未登记的分类
+  一律回落 ClassUnknown（不可分类 = 不可重试）。
+- Disposition(err)：调用点该调的那一个。宿主已显式归类时以那份为准；宿主自报
+  「不可重试」时不得回落到协议层映射，否则会把宿主已否决的失败翻成可重试。
+- 两层结论不一致时取不可重试的一侧：mcp.KindProtocol.Retryable() 为 true，
+  映射后却是 ClassPermanent——协议层问「重试有没有可能恢复」，处置层问
+  「原样重试有没有意义」；误判可重试会把一次失败放大成 N 次。
+- TestFailureClassCoversEveryErrorKind 枚举 ErrorKind 的全部取值，缺映射当场红
+  （新增协议层分类漏改映射表时兜住）。
+Closes oagentkit/mcpkit#17
+
 ## [v0.12.2] — 2026-10-21
 
 - 杂务(deps)：依赖地板跟到矩阵本轮新版本（第二轮：消除打 tag 时刻的地板落后）
