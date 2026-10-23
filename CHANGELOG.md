@@ -2,6 +2,46 @@
 
 > 本文件由 `matrix-tools/scripts/gen_changelogs.py` 从 git 历史生成，按 tag 切段、取每段内的 conventional commit 渲染。
 
+## [v0.12.5] — 2026-10-23
+
+- 杂务(deps)：依赖地板跟到矩阵本轮新版本——guardx v0.14.0 / mcpkit v0.8.6 / concurrency v0.20.2 / pkg v0.22.0
+
+## 下游要做什么
+**`go mod tidy`**。地板抬高对下游是**隐式破坏性变更**：不跑就报
+`updates to go.mod needed`，且报错不提真正原因（**不是本仓的 API 变了**）。
+本仓**自身代码零改动**——只看本仓的 diff 看不出这是一次地板抬高。
+## 为什么抬
+本仓 HEAD（`1991f00`，2026-10-21T12:01:45Z）**早于**下面四个版本的发布时刻，
+所以宽口径判据（`verify_tag_floor.py --repo toolgate --ref HEAD`）此刻仍判绿；
+但用门禁自己的 `check_ref()` 把 ref 时刻推进到现在 ⇒ **4 处红**：
+- github.com/oagentkit/guardx: v0.13.1 → v0.14.0（2026-10-22T09:46:52Z 发布）
+- github.com/oagentkit/mcpkit: v0.8.5 → v0.8.6（2026-10-23T05:54:01Z 发布）
+- github.com/oekit/concurrency: v0.19.0 → v0.20.2（2026-10-23T03:09:14Z 发布）
+- github.com/oekit/pkg: v0.20.0 → v0.22.0（2026-10-22T09:18:33Z 发布）
+⇒ **下一次发版会把「打 tag 那一刻就已落后」的地板发出去**，而 tag 受 protect-tags
+ruleset 保护不可重打 ⇒ 坏 tag 流出后只能补发新 tag，且 `--latest-only` 口径的 CI
+届时会当场判红（它审的就是「最新 tag 当时的地板」）。
+门禁给的修法是「抬 go.mod 地板 → go mod tidy → 重新发 tag」。本 PR 就是那条修法。
+## 为什么无行为差异
+逐条 diff 两版的实测差异，**四条对本仓都是行为中性**：
+- `guardx v0.14.0`：只改 `permgate/permgate.go`（新增「只读拦截」段）——本仓只 import
+  `guardx/invoke` + `guardx/toolfail`，未命中；
+- `mcpkit v0.8.6`：零 `.go` 改动；
+- `oekit/concurrency v0.20.2`：只改 `syncx/gate.go` + `syncx/syncx.go`
+  （`Gate.TryAcquire` 新增、`KeyedGate` 幂等标记改 `atomic.Bool`+CAS）——本仓只 import
+  `concurrency/async`，未命中；
+- `oekit/pkg v0.22.0`：只新增 `pathx/*` 与 `stringx/csv.go`（`status: added`），
+  既有函数逐字未改——本仓不 import `pathx` / `stringx`。
+本仓用到的转发面与符号集一字未动。
+## 门禁
+```
+go build ./...                 ✅
+go test -race ./...            ✅ (policy / toolprior / toolsched)
+go mod tidy -diff              ✅ 空
+gofmt -l .                     ✅ 空
+```
+
+
 ## [v0.12.4] — 2026-10-21
 
 - 杂务(deps)：依赖地板跟到矩阵本轮新版本——mcpkit v0.8.5
