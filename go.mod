@@ -7,11 +7,11 @@ toolchain go1.27.2
 require (
 	github.com/cloudwego/eino v0.9.21
 	github.com/oagentkit/mcpkit v0.8.6
-	github.com/oekit/concurrency v0.22.0
+	github.com/oekit/concurrency v0.23.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 
-require github.com/oekit/pkg v0.28.0 // indirect
+require github.com/oekit/pkg v0.31.0 // indirect
 
 require (
 	github.com/bahlo/generic-list-go v0.2.0 // indirect
