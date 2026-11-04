@@ -24,8 +24,10 @@ package toolsched
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"github.com/oekit/concurrency/async"
+	"github.com/oekit/concurrency/syncx"
 	"sync"
 )
 
@@ -310,7 +312,10 @@ type runner struct {
 	results []Result
 	filled  []bool
 
-	sem  chan struct{}
+	// sem 并行任务的在飞闸门（独占任务不占名额）；gate 并行持读锁、独占持写锁。
+	// 闸门用上游 oekit/concurrency/syncx.Gate：取名额感知 ctx（取消后不再
+	// 无限期等名额），归还名额幂等。
+	sem  *syncx.Gate
 	gate sync.RWMutex // 并行持读锁；独占持写锁
 
 	mu         sync.Mutex
@@ -332,7 +337,7 @@ func newRunner(ctx context.Context, maxC int, tasks []Task, items []Item, result
 		items:      items,
 		results:    results,
 		filled:     make([]bool, len(tasks)),
-		sem:        make(chan struct{}, maxC),
+		sem:        syncx.NewGate(maxC),
 		remaining:  make([]int, len(tasks)),
 		dependents: make([][]int, len(tasks)),
 		allDone:    make(chan struct{}),
@@ -414,9 +419,13 @@ func (r *runner) runOne(i int) {
 
 	// 并发门：独占先抢写锁（等在途读者收尾并挡住新读者），并行限流+读锁
 	if r.items[i].CanRunParallel {
-		r.sem <- struct{}{}
+		release, err := r.sem.Acquire(r.ctx)
+		if err != nil {
+			r.record(i, Result{ID: t.ID, Name: t.Name, Err: err})
+			return
+		}
 		r.gate.RLock()
-		defer func() { r.gate.RUnlock(); <-r.sem }()
+		defer func() { r.gate.RUnlock(); release() }()
 	} else {
 		r.gate.Lock()
 		defer r.gate.Unlock()
@@ -431,16 +440,25 @@ func (r *runner) runOne(i int) {
 	}
 }
 
+// taskPanicRunner 任务执行体 panic 的收编（async.Runner，concurrency#12/#13
+// 落地后回收 runGuarded 的手搓 recover）。观测面是 Result.Err（任务 ID 在文案
+// 里，与手搓版逐字一致）；本包无组件 logger，Handler 置空抑制全局 PanicHandler
+// 的 stderr 兜底——库形态不接 SetPanicHandler 的纪律延续；*async.PanicError
+// 携带 panic 栈，errors.As 可取。
+var taskPanicRunner = async.Runner{Handler: func(string, []byte) {}}
+
 // runGuarded 执行任务并隔离 panic：Task.Run 契约禁止 panic，但执行体来自外部
 // （MCP 工具适配层等）不可全信——panic 转为该任务的 Err，不阻断其余任务、
 // 不击穿进程（与 worker.Pool 的外部代码隔离同纪律；第六轮审计）。
-func runGuarded(ctx context.Context, t *Task) (out string, err error) {
-	defer func() {
-		if p := recover(); p != nil {
-			err = fmt.Errorf("toolsched: 任务 %q 执行体 panic: %v", t.ID, p)
-		}
-	}()
-	return t.Run(ctx)
+func runGuarded(ctx context.Context, t *Task) (string, error) {
+	out, err := async.RunSafeRetWith(taskPanicRunner, func() (string, error) {
+		return t.Run(ctx)
+	})
+	var pe *async.PanicError
+	if errors.As(err, &pe) {
+		err = fmt.Errorf("toolsched: 任务 %q 执行体 panic: %v", t.ID, pe.Value)
+	}
+	return out, err
 }
 
 // run 点火就绪集并等全部收口。
