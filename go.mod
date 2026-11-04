@@ -6,12 +6,12 @@ toolchain go1.27.2
 
 require (
 	github.com/cloudwego/eino v0.9.21
-	github.com/oagentkit/mcpkit v0.9.0
-	github.com/oekit/concurrency v0.23.3
+	github.com/oagentkit/mcpkit v0.9.1
+	github.com/oekit/concurrency v0.24.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 
-require github.com/oekit/pkg v0.31.1 // indirect
+require github.com/oekit/pkg v0.34.0 // indirect
 
 require (
 	github.com/bahlo/generic-list-go v0.2.0 // indirect
@@ -32,8 +32,8 @@ require (
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
 	github.com/modern-go/reflect2 v1.0.2 // indirect
 	github.com/nikolalohinski/gonja v1.5.3 // indirect
-	github.com/oagentkit/guardx v0.17.0
-	github.com/oagentkit/runtime v0.7.2 // indirect
+	github.com/oagentkit/guardx v0.17.1
+	github.com/oagentkit/runtime v0.7.3 // indirect
 	github.com/pelletier/go-toml/v2 v2.0.9 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.2 // indirect
