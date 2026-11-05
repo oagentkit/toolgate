@@ -25,8 +25,13 @@ func (t auditTool) InvokableRun(ctx context.Context, args string, opts ...tool.O
 	if t.onAudit != nil {
 		t.onAudit(t.op, dec)
 	}
-	if dec.Verdict == VerdictDeny {
-		return "", fmt.Errorf("policy: 操作审计门拒绝该工具调用（%s: %s）", dec.RuleID, dec.Reason)
+	// fail-closed 与 Stage 同口径（oagentkit/toolgate#40）：此前只拦 VerdictDeny，
+	// need_human/unknown/plan_only 静默放行执行体——宿主配置「该工具需人工审批」
+	// 后装饰器形态下工具照常执行，与 Stage 的「拒绝且不可重试」映射相反。
+	// 认不出的裁决同样拒绝（猜错的代价不是少放行一次）。
+	if dec.Verdict != VerdictAuto {
+		return "", fmt.Errorf("policy: 操作审计门拒绝该工具调用（verdict=%s, %s: %s）",
+			dec.Verdict, dec.RuleID, dec.Reason)
 	}
 	return t.InvokableTool.InvokableRun(ctx, args, opts...)
 }

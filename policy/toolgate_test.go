@@ -2,6 +2,7 @@ package policy
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/cloudwego/eino/components/tool"
@@ -67,5 +68,62 @@ func TestWithAuditGateNilGatePassthrough(t *testing.T) {
 	}
 	if !inner.called {
 		t.Fatal("底层应被调用")
+	}
+}
+
+// AuditGate fail-closed（toolgate#40）：非 VerdictAuto 一律拒绝且不可重试——
+// 与 Stage 对同一裁决集的映射对齐。此前只拦 deny，need_human/unknown 静默
+// 放行执行体（宿主配置「需人工审批」后装饰器形态下工具照跑）。
+func TestAuditGateFailClosed(t *testing.T) {
+	// 裁决注入走 policy 规则面（Issue5485 同款宿主用法：LoadOverrides 配
+	// 「该工具需人工审批」）；未识别裁决用包内 stubArbiter 直造。
+	mk := func(verdict Verdict, rule string) (tool.InvokableTool, *fakeTool) {
+		inner := &fakeTool{name: "restart_service"}
+		g := gateForVerdict(verdict, rule)
+		return AuditGate(g, Op{Type: OpToolCall, Mode: ModeConfirm, Tool: "restart_service", Mutating: true}, nil, inner), inner
+	}
+	for _, c := range []struct {
+		v    Verdict
+		name string
+	}{{VerdictDeny, "deny"}, {VerdictNeedHuman, "need_human"}, {VerdictUnknown, "unknown"}, {VerdictPlanOnly, "plan_only"}, {Verdict("weird"), "unrecognized"}} {
+		t.Run(c.name, func(t *testing.T) {
+			wrapped, inner := mk(c.v, "human-gate")
+			_, err := wrapped.InvokableRun(context.Background(), "{}")
+			if err == nil {
+				t.Fatalf("%s 裁决应拒绝执行", c.v)
+			}
+			if inner.called {
+				t.Fatalf("%s: 执行体不得被触达", c.v)
+			}
+			// 规则裁决带规则 id；arbiter 非法输出被 Decide fail-safe 升人审
+			//（RuleID 换 fail-safe 归属）——只断言拒绝不落执行体。
+			if c.v == VerdictDeny || c.v == VerdictNeedHuman || c.v == VerdictUnknown {
+				if !strings.Contains(err.Error(), "human-gate") {
+					t.Fatalf("错误应带规则 id: %v", err)
+				}
+			}
+		})
+	}
+	// auto 放行
+	g := gateForVerdict(VerdictAuto, "auto-rule")
+	inner := &fakeTool{name: "get_status"}
+	if _, err := AuditGate(g, Op{Type: OpToolCall, Mode: ModeAuto, Tool: "get_load"}, nil, inner).InvokableRun(context.Background(), "{}"); err != nil {
+		t.Fatalf("auto 应放行: %v", err)
+	}
+	if !inner.called {
+		t.Fatal("auto 应真实执行")
+	}
+}
+
+// gateForVerdict 造一个裁决恒为 v 的 Gate：规则裁决可表达的值走 LoadRules
+// （need_human/deny），表达不了的（plan_only/未识别）走 stubArbiter。
+func gateForVerdict(v Verdict, ruleID string) *Gate {
+	switch v {
+	case VerdictDeny, VerdictNeedHuman, VerdictUnknown:
+		p := DefaultPolicy()
+		p.Rules = []Rule{{ID: ruleID, Tools: []string{"restart_service"}, Verdict: v}}
+		return NewGate(p, nil)
+	default:
+		return NewGate(DefaultPolicy(), stubArbiter{v: v, reason: "stub-hit"})
 	}
 }
