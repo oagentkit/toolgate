@@ -53,18 +53,17 @@ func TestLoadOverrides(t *testing.T) {
 		}
 	})
 	t.Run("阈值只能调低不能调高", func(t *testing.T) {
+		// 超基座从静默 clamp 改为 fail-fast（toolgate#44：调高=扩权须走评审，
+		// 静默回基座把配置错误藏进启动成功里）
 		fsys := fstest.MapFS{path: &fstest.MapFile{Data: []byte(
 			"operation_policy:\n  auto_max_risk: 4\n  full_max_risk: 3\n")}}
-		p, err := LoadOverrides(fsys, path)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if p.AutoMaxRisk != 2 {
-			t.Fatalf("auto_max_risk=4 应被 clamp 回 2，got %d", p.AutoMaxRisk)
+		_, err := LoadOverrides(fsys, path)
+		if err == nil {
+			t.Fatal("auto_max_risk=4 超基座应 fail-fast")
 		}
 		fsys = fstest.MapFS{path: &fstest.MapFile{Data: []byte(
 			"operation_policy:\n  auto_max_risk: 1\n  full_max_risk: 2\n")}}
-		p, err = LoadOverrides(fsys, path)
+		p, err := LoadOverrides(fsys, path)
 		if err != nil {
 			t.Fatal(err)
 		}
