@@ -88,8 +88,8 @@ github.com/oagentkit/runtime v0.8.0 h1:N99lZJegdttQpIMGG4bTvWaZRRP7u2fr9xS2Izaxe
 github.com/oagentkit/runtime v0.8.0/go.mod h1:jiJELmEGZ1rYaNNxKX94mWxK83Hm1T7wlcuqR3ZFED0=
 github.com/oekit/concurrency v0.25.1 h1:MJ8EqzkTzk282qAOrV1PjzNrxoNo4salrzun7K1zqPE=
 github.com/oekit/concurrency v0.25.1/go.mod h1:jcmGKsn824v7RA3+CubaOqXERFJtsLMpgMSaMZOAxjo=
-github.com/oekit/pkg v0.34.1 h1:F+jDaHm7qDIeMvELrjUv2yGqJPOG3Qg5UL5VUjpojbU=
-github.com/oekit/pkg v0.34.1/go.mod h1:sVeOtmG1sLY2aSnzFIbUAF2Qoh7G8R5vnWtWmLCv8NM=
+github.com/oekit/pkg v0.35.0 h1:lKGJw4s9CzxUpmlE+iywpM9BIkSGPI0reKwpSaN5Nmo=
+github.com/oekit/pkg v0.35.0/go.mod h1:sVeOtmG1sLY2aSnzFIbUAF2Qoh7G8R5vnWtWmLCv8NM=
 github.com/onsi/ginkgo v1.6.0/go.mod h1:lLunBs/Ym6LB5Z9jYTR76FiuTmxDTDusOGeTQH+WWjE=
 github.com/onsi/ginkgo v1.8.0/go.mod h1:lLunBs/Ym6LB5Z9jYTR76FiuTmxDTDusOGeTQH+WWjE=
 github.com/onsi/gomega v1.5.0/go.mod h1:ex+gbHU/CVuBBDIJjb2X0qEXbFg53c61hWP/1CpauHY=
