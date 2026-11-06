@@ -2,6 +2,110 @@
 
 > 本文件由 `matrix-tools/scripts/gen_changelogs.py` 从 git 历史生成，按 tag 切段、取每段内的 conventional commit 渲染。
 
+## [v0.13.0] — 2026-11-06
+
+### 修复(policy)：overrides 阈值三档语义——0=禁用代批，负数/超基座 fail-fast（#44）
+
+auto_max_risk: 0 的自然语义「auto 模式禁止任何代批」此前被 <=0 钳回基座
+——clamp 把「调低」与「禁用」一并吞掉，配置面无禁用表达（只能绕道写 deny
+规则）。
+- *int 影子解码区分「未写键」（继承基座）与「显式 0」（禁用）——yaml 缺键
+  零值也是 0，裸 int 分不出
+- 超基座从静默 clamp 改为 fail-fast（调高=扩权须改基座走评审；静默回基座
+  把配置错误藏进启动成功里）
+- 负数 fail-fast（无语义；缺省请删键）
+TestLoadOverridesZeroDisables 四档钉子；既有 clamp 测试同步更新为
+fail-fast 断言。全仓 -race 绿。
+关联 oagentkit/toolgate#44
+Co-authored-by: Murphy-Yi <zhangyi@Murphy-YideMac-Mini.local>
+
+### 修复(policy,docs)：AuditGate fail-closed 与 Stage 对齐 + 调度去重承诺纠偏（#40 #41）
+
+policy#40——AuditGate 此前只拦 VerdictDeny，need_human/unknown/plan_only
+静默放行执行体：宿主 LoadOverrides 配「该工具需人工审批」后，装饰器形态
+下工具照常执行、只多一条审计回调，与 Stage 的「非 auto 一律拒绝且不可
+重试」映射相反（AGENTS 的 fail-closed 纪律在装饰器形态失守）。拒绝条件
+改为 Verdict != VerdictAuto，错误带 verdict/rule/reason 三元组。
+toolsched#41——README/AGENTS 宣称「并发调度与去重」，但 Call 结构无参数
+字段（ID/Name/DependsOn/Hints/StopAfter），执行体参数活在 Task.Run 闭包
+里，调度层没有「name+归一化参数」去重键可算——去重语义在对标落地时丢失，
+文档是残留承诺。文档三方（README/AGENTS/包注释）纠偏为「不做语义去重，
+宿主装配前自做」；诚实文档优于幽灵承诺。
+TestAuditGateFailClosed：deny/need_human/unknown/plan_only/未识别五裁决
+逐点拒绝 + 执行体零触达 + auto 真实放行。
+关联 oagentkit/toolgate#40 oagentkit/toolgate#41
+Co-authored-by: Murphy-Yi <zhangyi@Murphy-YideMac-Mini.local>
+
+- 杂务(deps)：依赖地板追到最新——github.com/oagentkit/guardx v0.19.0
+
+| 依赖 | 现地板 | 抬到 |
+|---|---|---|
+| `github.com/oagentkit/guardx` | `v0.18.0` | `v0.19.0` |
+| `github.com/oagentkit/runtime` | `v0.7.3` | `v0.8.0` |
+## 为什么
+矩阵的**发版时刻地板时效**门禁（`verify_tag_floor --ref HEAD`）要求：各仓 HEAD
+（= 下次发版会发出去的内容）的依赖地板，相对那一刻的依赖最新版本，不能已落后。
+oekit 基座与矩阵模块都在高频发版 ⇒ 地板是**跑步机**，落后一格就会判红。
+## 兼容性实测
+本工具在提交前跑完 `go build` / `go vet` / `go test -race -count=1 ./...`（全绿才提交）
+与 `go mod tidy -diff`（无漂移）⇒ 改动**只影响依赖版本**，零行为差异。
+只改 `go.mod` / `go.sum` ⇒ 不需要 CHANGELOG 条目（版本段由下次发版的 `prewrite` 生成）。
+Co-authored-by: Murphy-Yi <zhangyi@Murphy-YideMac-Mini.local>
+
+- 杂务(deps)：依赖地板追到最新——github.com/oekit/concurrency v0.25.1
+
+| 依赖 | 现地板 | 抬到 |
+|---|---|---|
+| `github.com/oekit/concurrency` | `v0.24.0` | `v0.25.1` |
+## 为什么
+矩阵的**发版时刻地板时效**门禁（`verify_tag_floor --ref HEAD`）要求：各仓 HEAD
+（= 下次发版会发出去的内容）的依赖地板，相对那一刻的依赖最新版本，不能已落后。
+oekit 基座与矩阵模块都在高频发版 ⇒ 地板是**跑步机**，落后一格就会判红。
+## 兼容性实测
+本工具在提交前跑完 `go build` / `go vet` / `go test -race -count=1 ./...`（全绿才提交）
+与 `go mod tidy -diff`（无漂移）⇒ 改动**只影响依赖版本**，零行为差异。
+只改 `go.mod` / `go.sum` ⇒ 不需要 CHANGELOG 条目（版本段由下次发版的 `prewrite` 生成）。
+Co-authored-by: Murphy-Yi <zhangyi@Murphy-YideMac-Mini.local>
+
+- 杂务(deps)：依赖地板追到最新——本轮新 tag（首轮 tidy 撞上新发版 proxy 延迟，重跑补完）
+
+Co-authored-by: Murphy-Yi <zhangyi@Murphy-YideMac-Mini.local>
+
+- 杂务(deps)：依赖地板追到最新——github.com/oekit/pkg v0.34.1
+
+| 依赖 | 现地板 | 抬到 |
+|---|---|---|
+| `github.com/oekit/pkg` | `v0.34.0` | `v0.34.1` |
+## 为什么
+矩阵的**发版时刻地板时效**门禁（`verify_tag_floor --ref HEAD`）要求：各仓 HEAD
+（= 下次发版会发出去的内容）的依赖地板，相对那一刻的依赖最新版本，不能已落后。
+oekit 基座与矩阵模块都在高频发版 ⇒ 地板是**跑步机**，落后一格就会判红。
+## 兼容性实测
+本工具在提交前跑完 `go build` / `go vet` / `go test -race -count=1 ./...`（全绿才提交）
+与 `go mod tidy -diff`（无漂移）⇒ 改动**只影响依赖版本**，零行为差异。
+只改 `go.mod` / `go.sum` ⇒ 不需要 CHANGELOG 条目（版本段由下次发版的 `prewrite` 生成）。
+Co-authored-by: Murphy-Yi <zhangyi@Murphy-YideMac-Mini.local>
+
+- 杂务(deps)：依赖地板追到最新——github.com/oagentkit/guardx v0.17.1
+
+| 依赖 | 现地板 | 抬到 |
+|---|---|---|
+| `github.com/oagentkit/guardx` | `v0.17.0` | `v0.17.1` |
+| `github.com/oagentkit/mcpkit` | `v0.9.0` | `v0.9.1` |
+| `github.com/oagentkit/runtime` | `v0.7.2` | `v0.7.3` |
+| `github.com/oekit/concurrency` | `v0.23.3` | `v0.24.0` |
+| `github.com/oekit/pkg` | `v0.31.1` | `v0.34.0` |
+## 为什么
+矩阵的**发版时刻地板时效**门禁（`verify_tag_floor --ref HEAD`）要求：各仓 HEAD
+（= 下次发版会发出去的内容）的依赖地板，相对那一刻的依赖最新版本，不能已落后。
+oekit 基座与矩阵模块都在高频发版 ⇒ 地板是**跑步机**，落后一格就会判红。
+## 兼容性实测
+本工具在提交前跑完 `go build` / `go vet` / `go test -race -count=1 ./...`（全绿才提交）
+与 `go mod tidy -diff`（无漂移）⇒ 改动**只影响依赖版本**，零行为差异。
+只改 `go.mod` / `go.sum` ⇒ 不需要 CHANGELOG 条目（版本段由下次发版的 `prewrite` 生成）。
+Co-authored-by: Murphy-Yi <zhangyi@Murphy-YideMac-Mini.local>
+
+
 ## [v0.12.6] — 2026-11-04
 
 ### 重构(toolsched)：并行在飞闸门收编 syncx.Gate、runGuarded 收口 RunSafeRetWith
