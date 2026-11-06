@@ -36,6 +36,13 @@ TestAuditGateFailClosed：deny/need_human/unknown/plan_only/未识别五裁决
 关联 oagentkit/toolgate#40 oagentkit/toolgate#41
 Co-authored-by: Murphy-Yi <zhangyi@Murphy-YideMac-Mini.local>
 
+- 杂务(deps)：依赖地板追到最新——github.com/oagentkit/mcpkit v0.11.0
+
+mcpkit v0.11.0（2026-11-06 发布）落地后本仓地板落后；verify_tag_floor 要求
+打 tag 时的地板必须当时最新。提交前 go build / go vet / go test -race 全绿，
+go mod tidy -diff 无漂移；零行为差异。
+Co-authored-by: Murphy-Yi <zhangyi@Murphy-YideMac-Mini.local>
+
 - 杂务(deps)：依赖地板追到最新——github.com/oagentkit/guardx v0.19.0
 
 | 依赖 | 现地板 | 抬到 |
