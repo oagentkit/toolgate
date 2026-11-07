@@ -45,8 +45,9 @@ func ValidMode(s string) bool {
 	return modes[Mode(s)]
 }
 
-// Verdict 裁决值：三值裁决 + 两个过程值（plan_only=计划模式只审不执行；
-// unknown=灰区待仲裁，仅例外规则可产出）。
+// Verdict 裁决值：三值裁决 + 两个过程值。plan_only=降级为仅提审（矩阵 plan
+// 模式与例外规则均可产出，oagentkit/toolgate#54）；unknown=灰区待仲裁（仅例外
+// 规则可写——裁决面要么经仲裁收敛为三值、要么 fail-safe 升人审，从不原样返回）。
 type Verdict string
 
 const (
@@ -109,7 +110,7 @@ type Rule struct {
 	MinRisk  int      `yaml:"min_risk"` // 含（对 plan_submit 的 Risk 生效；0=不限）
 	MaxRisk  int      `yaml:"max_risk"` // 含；0=不限
 	Mutating *bool    `yaml:"mutating"` // nil=不限
-	Verdict  Verdict  `yaml:"verdict"`  // auto_proceed|need_human|deny|unknown
+	Verdict  Verdict  `yaml:"verdict"`  // auto_proceed|need_human|deny|plan_only|unknown
 	Reason   string   `yaml:"reason"`
 }
 
@@ -232,11 +233,35 @@ func (g *Gate) decidePlanSubmit(op Op) Decision {
 
 // isValidVerdict 例外规则 verdict 合法域（第九轮审计 C 级：此前零校验，
 // 漏写/拼错的 yaml verdict 原样透传，且 toolgate 只判 deny——一切非 deny
-// 值都放行，fail-open）。
+// 值都放行，fail-open）。plan_only 属合法域（oagentkit/toolgate#54）：它是
+// Verdict 的合法过程值且 Verdict 注释承诺例外规则可产出——规则写 plan_only
+// 表达「该操作降级为仅提审」，语义与 need_human（升人审）不同，把它当非法
+// 值 fail-safe 会改写配置意图，审计理由还谎报「规则 verdict 非法」。
 func isValidVerdict(v Verdict) bool {
 	switch v {
-	case VerdictAuto, VerdictNeedHuman, VerdictDeny, VerdictUnknown:
+	case VerdictAuto, VerdictNeedHuman, VerdictDeny, VerdictPlanOnly, VerdictUnknown:
 		return true
 	}
 	return false
+}
+
+// verdictDisposition 裁决→执行处置的唯一映射单源（oagentkit/toolgate#53）：
+// AuditGate 装饰器与 Stage 适配器都必须经它取放行/拒绝结论，谁也不许再自写
+// 一份 if/switch——#40 的教训正是两条判定路径各判各的，一面修了/漏修了另一面
+// 毫无感知，静默漂移到行为相反为止。新增 Verdict 值时只改这里（忘了登记会先
+// 被本函数的 fail-closed 兜住，测试再当场红）。
+//
+// 一切非 auto 的拒绝均不可重试：deny 是策略否定，重试不会让策略变松；
+// need_human/plan_only 的下一步是带外人工动作，把「需要人」翻译成「多试
+// 几次」只会撞出退避风暴。认不出的裁决同样拒绝（fail-closed）——猜错的代价
+// 不是少放行一次；known=false 供调用方把「未识别」如实写进审计理由。
+func verdictDisposition(v Verdict) (allow, retryable, known bool) {
+	switch v {
+	case VerdictAuto:
+		return true, false, true
+	case VerdictNeedHuman, VerdictDeny, VerdictPlanOnly, VerdictUnknown:
+		return false, false, true
+	default:
+		return false, false, false
+	}
 }

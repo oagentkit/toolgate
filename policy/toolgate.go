@@ -25,11 +25,12 @@ func (t auditTool) InvokableRun(ctx context.Context, args string, opts ...tool.O
 	if t.onAudit != nil {
 		t.onAudit(t.op, dec)
 	}
-	// fail-closed 与 Stage 同口径（oagentkit/toolgate#40）：此前只拦 VerdictDeny，
+	// 非 auto 一律拒绝（fail-closed，oagentkit/toolgate#40）：此前只拦 VerdictDeny，
 	// need_human/unknown/plan_only 静默放行执行体——宿主配置「该工具需人工审批」
-	// 后装饰器形态下工具照常执行，与 Stage 的「拒绝且不可重试」映射相反。
-	// 认不出的裁决同样拒绝（猜错的代价不是少放行一次）。
-	if dec.Verdict != VerdictAuto {
+	// 后装饰器形态下工具照常执行。放行/拒绝结论与 Stage 同取唯一映射单源
+	// verdictDisposition（#53）：两个面共用一张表，不再各判各的——#40 的根因
+	// 正是两条判定路径漂移，一面修了另一面没修。
+	if allow, _, _ := verdictDisposition(dec.Verdict); !allow {
 		return "", fmt.Errorf("policy: 操作审计门拒绝该工具调用（verdict=%s, %s: %s）",
 			dec.Verdict, dec.RuleID, dec.Reason)
 	}

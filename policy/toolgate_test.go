@@ -7,6 +7,8 @@ import (
 
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/schema"
+
+	"github.com/oagentkit/guardx/invoke"
 )
 
 // fakeTool 记录式工具替身：记录是否被真实调用。
@@ -71,43 +73,51 @@ func TestWithAuditGateNilGatePassthrough(t *testing.T) {
 	}
 }
 
-// AuditGate fail-closed（toolgate#40）：非 VerdictAuto 一律拒绝且不可重试——
-// 与 Stage 对同一裁决集的映射对齐。此前只拦 deny，need_human/unknown 静默
-// 放行执行体（宿主配置「需人工审批」后装饰器形态下工具照跑）。
+// TestAuditGateFailClosed（toolgate#40/#53）：非 VerdictAuto 一律拒绝且执行体
+// 零触达——放行/拒绝结论取自唯一映射单源 verdictDisposition，与 Stage 同表。
+// 裁决注入走宿主真实表达路径：规则面（deny/need_human/plan_only，#54 起
+// plan_only 可由规则直产）与矩阵面（plan 模式提审恒 plan_only）。
 func TestAuditGateFailClosed(t *testing.T) {
-	// 裁决注入走 policy 规则面（Issue5485 同款宿主用法：LoadOverrides 配
-	// 「该工具需人工审批」）；未识别裁决用包内 stubArbiter 直造。
-	mk := func(verdict Verdict, rule string) (tool.InvokableTool, *fakeTool) {
-		inner := &fakeTool{name: "restart_service"}
-		g := gateForVerdict(verdict, rule)
-		return AuditGate(g, Op{Type: OpToolCall, Mode: ModeConfirm, Tool: "restart_service", Mutating: true}, nil, inner), inner
-	}
-	for _, c := range []struct {
-		v    Verdict
+	type row struct {
 		name string
-	}{{VerdictDeny, "deny"}, {VerdictNeedHuman, "need_human"}, {VerdictUnknown, "unknown"}, {VerdictPlanOnly, "plan_only"}, {Verdict("weird"), "unrecognized"}} {
-		t.Run(c.name, func(t *testing.T) {
-			wrapped, inner := mk(c.v, "human-gate")
-			_, err := wrapped.InvokableRun(context.Background(), "{}")
+		g    *Gate
+		op   Op
+		id   string // 拒绝错误应能定位到的规则 id
+	}
+	// 规则面注入。Mutating 故意置 false：若规则注入失效，裁决会落回只读白名单
+	// 放行、本测当场红——置 true 则矩阵层兜底 deny，测的其实是矩阵不是规则注入。
+	mkRule := func(v Verdict) row {
+		id := "rule-" + string(v)
+		p := DefaultPolicy()
+		p.Rules = []Rule{{ID: id, Tools: []string{"restart_service"}, Verdict: v}}
+		return row{name: string(v) + " 规则", g: NewGate(p, nil),
+			op: Op{Type: OpToolCall, Mode: ModeConfirm, Tool: "restart_service"}, id: id}
+	}
+	for _, r := range []row{
+		mkRule(VerdictDeny),
+		mkRule(VerdictNeedHuman),
+		mkRule(VerdictPlanOnly), // plan_only=降级仅提审 ≠ need_human，语义不得被改写
+		mkRule(VerdictUnknown),  // 灰区无仲裁器：Decide fail-safe 升人审，装饰器仍拒绝
+		{"plan_only 矩阵（plan 模式提审）", NewGate(nil, nil),
+			Op{Type: OpPlanSubmit, Mode: ModePlan, Risk: 2}, "plan_mode"},
+	} {
+		t.Run(r.name, func(t *testing.T) {
+			inner := &fakeTool{name: r.op.Tool}
+			_, err := AuditGate(r.g, r.op, nil, inner).InvokableRun(context.Background(), "{}")
 			if err == nil {
-				t.Fatalf("%s 裁决应拒绝执行", c.v)
+				t.Fatal("非 auto 裁决应拒绝执行")
+			}
+			if !strings.Contains(err.Error(), r.id) {
+				t.Fatalf("错误应带规则 id %s: %v", r.id, err)
 			}
 			if inner.called {
-				t.Fatalf("%s: 执行体不得被触达", c.v)
-			}
-			// 规则裁决带规则 id；arbiter 非法输出被 Decide fail-safe 升人审
-			//（RuleID 换 fail-safe 归属）——只断言拒绝不落执行体。
-			if c.v == VerdictDeny || c.v == VerdictNeedHuman || c.v == VerdictUnknown {
-				if !strings.Contains(err.Error(), "human-gate") {
-					t.Fatalf("错误应带规则 id: %v", err)
-				}
+				t.Fatal("被拒调用不得触达执行体")
 			}
 		})
 	}
-	// auto 放行
-	g := gateForVerdict(VerdictAuto, "auto-rule")
+	// auto 放行且真实执行（对照组：拒绝不是因为门坏了）。
 	inner := &fakeTool{name: "get_status"}
-	if _, err := AuditGate(g, Op{Type: OpToolCall, Mode: ModeAuto, Tool: "get_load"}, nil, inner).InvokableRun(context.Background(), "{}"); err != nil {
+	if _, err := AuditGate(NewGate(nil, nil), Op{Type: OpToolCall, Mode: ModeAuto, Tool: "get_load"}, nil, inner).InvokableRun(context.Background(), "{}"); err != nil {
 		t.Fatalf("auto 应放行: %v", err)
 	}
 	if !inner.called {
@@ -115,15 +125,72 @@ func TestAuditGateFailClosed(t *testing.T) {
 	}
 }
 
-// gateForVerdict 造一个裁决恒为 v 的 Gate：规则裁决可表达的值走 LoadRules
-// （need_human/deny），表达不了的（plan_only/未识别）走 stubArbiter。
-func gateForVerdict(v Verdict, ruleID string) *Gate {
-	switch v {
-	case VerdictDeny, VerdictNeedHuman, VerdictUnknown:
+// TestVerdictDispositionSingleSource（#53）：唯一映射单源对裁决全集的逐点
+// 断言——auto 是唯一放行值；四个非 auto 合法值（含 plan_only）拒绝且不可
+// 重试；认不出的值 fail-closed 并标记未登记。新增 Verdict 值忘了登记时这里
+// 先红，而不是等两条执行路径里的某一面悄悄放行。
+func TestVerdictDispositionSingleSource(t *testing.T) {
+	for _, v := range []Verdict{VerdictAuto, VerdictNeedHuman, VerdictDeny, VerdictPlanOnly, VerdictUnknown} {
+		allow, retryable, known := verdictDisposition(v)
+		if !known {
+			t.Fatalf("%s 应为已登记裁决", v)
+		}
+		if v == VerdictAuto {
+			if !allow || retryable {
+				t.Fatalf("auto 应放行且不可重试语义不适用: allow=%v retryable=%v", allow, retryable)
+			}
+			continue
+		}
+		if allow || retryable {
+			t.Fatalf("%s 应拒绝且不可重试: allow=%v retryable=%v", v, allow, retryable)
+		}
+	}
+	// 未识别裁决（未来新增值/脏数据）：拒绝、不可重试、known=false——调用方
+	// 据此把「未识别」如实写进审计理由，而不是谎报成「策略拒绝了」。
+	allow, retryable, known := verdictDisposition(Verdict("weird"))
+	if allow || retryable || known {
+		t.Fatalf("未识别裁决应 fail-closed 且标记未登记: allow=%v retryable=%v known=%v", allow, retryable, known)
+	}
+}
+
+// TestAuditFacesAgreeOnEveryProducibleVerdict（#53）：装饰器与 Stage 是同一张
+// 映射表（verdictDisposition）的两个出口——对 Gate 能产出的每一类裁决，两面
+// 必须同放行/同拒绝、同触达执行体，Stage 面的拒绝一律不可重试。#40 的形态
+// 就是「一面修了另一面没修」：此测红 = 判定又漂移回两张表了。
+func TestAuditFacesAgreeOnEveryProducibleVerdict(t *testing.T) {
+	ruleGate := func(v Verdict) *Gate {
 		p := DefaultPolicy()
-		p.Rules = []Rule{{ID: ruleID, Tools: []string{"restart_service"}, Verdict: v}}
+		p.Rules = []Rule{{ID: "rule-" + string(v), Tools: []string{"restart_service"}, Verdict: v}}
 		return NewGate(p, nil)
-	default:
-		return NewGate(DefaultPolicy(), stubArbiter{v: v, reason: "stub-hit"})
+	}
+	for _, c := range []struct {
+		name string
+		g    *Gate
+		op   Op
+	}{
+		{"auto 白名单放行", NewGate(nil, nil), Op{Type: OpToolCall, Mode: ModeAuto, Tool: "read_logs"}},
+		{"deny 变异拒绝", NewGate(nil, nil), Op{Type: OpToolCall, Mode: ModeFull, Tool: "restart_service", Mutating: true}},
+		{"need_human 规则", ruleGate(VerdictNeedHuman), Op{Type: OpToolCall, Mode: ModeConfirm, Tool: "restart_service"}},
+		{"plan_only 规则（#54）", ruleGate(VerdictPlanOnly), Op{Type: OpToolCall, Mode: ModeConfirm, Tool: "restart_service"}},
+		{"plan_only 矩阵", NewGate(nil, nil), Op{Type: OpPlanSubmit, Mode: ModePlan, Risk: 2, Tool: "restart_all"}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			// 装饰器面
+			inner := &fakeTool{name: c.op.Tool}
+			_, decErr := AuditGate(c.g, c.op, nil, inner).InvokableRun(context.Background(), "{}")
+			// Stage 面
+			hits := 0
+			ch := chainWith(t, Stage(c.g, c.op, nil), &hits)
+			_, stErr := ch.Do(context.Background(), invoke.Call{Name: c.op.Tool})
+			if (decErr == nil) != (stErr == nil) {
+				t.Fatalf("两面结论漂移: 装饰器 err=%v, Stage err=%v", decErr, stErr)
+			}
+			if inner.called != (hits > 0) {
+				t.Fatalf("执行体触达漂移: 装饰器触达=%v, Stage 触达=%d 次", inner.called, hits)
+			}
+			if stErr != nil && invoke.Retryable(stErr) {
+				t.Fatal("审计门拒绝不可重试")
+			}
+		})
 	}
 }

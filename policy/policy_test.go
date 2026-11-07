@@ -3,6 +3,7 @@ package policy
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"testing/fstest"
 )
@@ -91,6 +92,28 @@ func TestLoadOverrides(t *testing.T) {
 			t.Fatalf("例外规则应优先于矩阵层，got %+v", got)
 		}
 	})
+}
+
+// TestRuleVerdictPlanOnlyIsLegal（toolgate#54）：plan_only 是 Verdict 注释承诺
+// 「例外规则可产出」的合法过程值——规则写 plan_only 应原样产出「降级为仅提审」，
+// 而不是被合法域白名单 fail-safe 改写成 need_human（语义不同：前者=只审不执行，
+// 后者=升人审），更不该给出「规则 verdict 非法（plan_only）」的误导审计理由。
+func TestRuleVerdictPlanOnlyIsLegal(t *testing.T) {
+	pol := &Policy{AutoMaxRisk: 2, FullMaxRisk: 3, Rules: []Rule{
+		{ID: "prod-change-plan-only", Tools: []string{"restart_service"}, Verdict: VerdictPlanOnly, Reason: "生产变更只审不执行"},
+	}}
+	got := NewGate(pol, nil).Decide(context.Background(),
+		Op{Type: OpToolCall, Mode: ModeFull, Tool: "restart_service"})
+	if got.Verdict != VerdictPlanOnly || got.Decider != DeciderRule || got.RuleID != "prod-change-plan-only" {
+		t.Fatalf("plan_only 规则应原样产出降级裁决, got %+v", got)
+	}
+	// 拼错的 verdict 仍走 fail-safe 升人审（合法域扩员不等于放弃校验）
+	pol.Rules = []Rule{{ID: "typo", Tools: []string{"restart_service"}, Verdict: Verdict("plan_onli")}}
+	got = NewGate(pol, nil).Decide(context.Background(),
+		Op{Type: OpToolCall, Mode: ModeAuto, Tool: "restart_service"})
+	if got.Verdict != VerdictNeedHuman || !strings.Contains(got.Reason, "非法") {
+		t.Fatalf("拼错的 verdict 应 fail-safe 升人审, got %+v", got)
+	}
 }
 
 type stubArbiter struct {
