@@ -2,6 +2,18 @@
 
 > 本文件由 `matrix-tools/scripts/gen_changelogs.py` 从 git 历史生成，按 tag 切段、取每段内的 conventional commit 渲染。
 
+## [v0.15.1] — 2026-11-08
+
+### 修复(toolsched)：PanicHandler 适配 concurrency v0.28.2+ 签名（ctx, r any, stack）
+
+concurrency v0.28.2 将 `async.PanicHandler` 统一为 `func(ctx context.Context, r any, stack []byte)`
+（oekit/concurrency#184 BREAKING）。taskPanicRunner 的 noop Handler 同步新签名；
+观测面不变（Result.Err / *async.PanicError）。
+
+### 依赖地板：oekit 基座追平 BOM v0.2.7——concurrency v0.28.3 / pkg v0.37.3
+
+oekit BOM 兼容地板门禁（oekit/oekit#163）纳入 oagentkit 消费方后的对齐轮。
+
 ## [v0.15.0] — 2026-11-07
 
 ### 新增(invoke)：补搬迁兼容壳——Deprecated 转发 guardx/invoke,旧 import 路径恢复编译（agent#68）
