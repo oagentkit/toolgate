@@ -2,6 +2,50 @@
 
 > 本文件由 `matrix-tools/scripts/gen_changelogs.py` 从 git 历史生成，按 tag 切段、取每段内的 conventional commit 渲染。
 
+## [v0.14.0] — 2026-11-07
+
+### 修复(policy)：裁决→放行映射收敛唯一单源，规则合法 verdict 域补 plan_only（#53 #54）
+
+close #53
+close #54
+## #53 AuditGate 装饰器与 Stage 收敛同一张裁决→放行映射表
+**事实核对**：issue 正文描述的「装饰器只拦 `VerdictDeny`」在当前 main 已不存在——`fix(policy,docs): AuditGate fail-closed 与 Stage 对齐`（#42，merge `989c918`，随 v0.13.0 发布）已把装饰器改为「非 `VerdictAuto` 一律拒绝」，并关掉了同型的 #40。#53 报文引用的 `toolgate.go:23-31` 是修复前代码。
+**残留的真问题**（issue「建议修复」后半句）：装饰器与 Stage 仍是**两份各判各的判断**（一个 `if`、一个五分支 `switch`），今天结论一致只是碰巧——#40 的形态正是「两条路径漂移、一面修了另一面没修」，没有任何护栏阻止复发。
+**修法**：
+- 抽 `verdictDisposition(v) (allow, retryable, known)` 作为裁决→执行处置的**唯一映射单源**（`policy/policy.go`）：auto 唯一放行；其余四个合法值拒绝且不可重试；认不出的值 fail-closed 且 `known=false` 供调用方把「未识别」如实写进审计理由。新增 Verdict 值时只改这一处。
+- 装饰器（`toolgate.go`）与 Stage（`stage.go`）全部改为经该单源取结论，删掉各自的分支判断。
+- 新增 `TestAuditFacesAgreeOnEveryProducibleVerdict`：对 Gate 能产出的每一类裁决（auto 白名单 / deny 变异 / need_human 规则 / plan_only 规则 / plan_only 矩阵），**同一 Gate 同时驱动装饰器与 Stage 两面**，断言同放行、同触达执行体、拒绝不可重试——两面漂移当场红。
+- 新增 `TestVerdictDispositionSingleSource`：对裁决全集（含未识别值）逐点断言映射单源。
+- 修正既有 `TestAuditGateFailClosed` 的**假阳注入**：原 plan_only/未识别两行走 `DefaultPolicy`（无规则）+ `stubArbiter` 造门，但仲裁器只在「规则 verdict=unknown 命中」时才被触发，实际裁决走的是矩阵 deny——测的不是注入的裁决。现改走宿主真实表达路径（规则面直产 + plan 模式提审矩阵面），并把 `Mutating` 置 false 防矩阵兜底掩盖规则注入失效。
+## #54 规则合法 verdict 域纳入 plan_only
+**根因**：`isValidVerdict` 白名单不含 `VerdictPlanOnly`，而 `Verdict` 注释称 plan_only 是「例外规则可产出」的过程值——yaml 规则写 `verdict: plan_only` 会被 fail-safe 改写成 `need_human`，审计理由谎报「规则 verdict 非法（plan_only）」。plan_only=降级为仅提审 ≠ need_human=升人审，fail-safe 改写了配置意图。
+**修法**：
+- `VerdictPlanOnly` 入 `isValidVerdict` 合法域：规则可直产 plan_only，经 #53 的映射单源在两个执行面统一按「拒绝且不可重试」收口（fail-closed 不变，语义不再被改写）。
+- `Rule.Verdict` 字段注释、`LoadOverrides` 报错文案把合法集列全（`auto_proceed|need_human|deny|plan_only|unknown`），`Verdict` 类型注释口径改准（plan_only 矩阵与规则均可产出；unknown 仅规则可写且裁决面从不原样返回）。
+- 测试：`TestRuleVerdictPlanOnlyIsLegal`（规则原样产出 plan_only；拼错值仍 fail-safe 升人审）+ `TestLoadOverridesRuleVerdictDomain`（加载期放行 plan_only 规则、拼错值 fail-fast 且文案含合法集）。
+## 验证
+- `gofmt -l .` 空、`go vet ./...`、`go build ./...`、`go test ./...` 本地全绿。
+- 未触碰 CHANGELOG.md / go.mod / AGENTS.md / README / matrix-tools，未打 tag。
+
+- 杂务(deps)：依赖地板追到最新——github.com/oagentkit/guardx v0.20.0
+
+| 依赖 | 现地板 | 抬到 |
+|---|---|---|
+| `github.com/oagentkit/guardx` | `v0.19.0` | `v0.20.0` |
+| `github.com/oagentkit/mcpkit` | `v0.11.0` | `v0.12.0` |
+| `github.com/oagentkit/runtime` | `v0.8.0` | `v0.11.0` |
+| `github.com/oekit/concurrency` | `v0.25.1` | `v0.28.0` |
+| `github.com/oekit/pkg` | `v0.35.0` | `v0.37.0` |
+## 为什么
+矩阵的**发版时刻地板时效**门禁（`verify_tag_floor --ref HEAD`）要求：各仓 HEAD
+（= 下次发版会发出去的内容）的依赖地板，相对那一刻的依赖最新版本，不能已落后。
+oekit 基座与矩阵模块都在高频发版 ⇒ 地板是**跑步机**，落后一格就会判红。
+## 兼容性实测
+本工具在提交前跑完 `go build` / `go vet` / `go test -race -count=1 ./...`（全绿才提交）
+与 `go mod tidy -diff`（无漂移）⇒ 改动**只影响依赖版本**，零行为差异。
+只改 `go.mod` / `go.sum` ⇒ 不需要 CHANGELOG 条目（版本段由下次发版的 `prewrite` 生成）。
+
+
 ## [v0.13.0] — 2026-11-06
 
 ### 修复(policy)：overrides 阈值三档语义——0=禁用代批，负数/超基座 fail-fast（#44）
