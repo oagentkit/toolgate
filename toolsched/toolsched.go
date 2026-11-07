@@ -445,7 +445,7 @@ func (r *runner) runOne(i int) {
 // 里，与手搓版逐字一致）；本包无组件 logger，Handler 置空抑制全局 PanicHandler
 // 的 stderr 兜底——库形态不接 SetPanicHandler 的纪律延续；*async.PanicError
 // 携带 panic 栈，errors.As 可取。
-var taskPanicRunner = async.Runner{Handler: func(string, []byte) {}}
+var taskPanicRunner = async.Runner{Handler: func(context.Context, any, []byte) {}}
 
 // runGuarded 执行任务并隔离 panic：Task.Run 契约禁止 panic，但执行体来自外部
 // （MCP 工具适配层等）不可全信——panic 转为该任务的 Err，不阻断其余任务、
