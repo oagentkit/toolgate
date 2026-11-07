@@ -24,12 +24,14 @@ import (
 //
 // # 裁决到放行/拒绝的映射
 //
-//	VerdictAuto      放行
-//	VerdictDeny      拒绝，不可重试（策略否定；重试不会让策略变松）
-//	VerdictNeedHuman 拒绝，**不可重试**：重试会立刻得到同样的结果，
-//	                人工审批是带外动作，不该由退避重试去撞
-//	VerdictPlanOnly  拒绝（执行被降级为仅提审），不可重试
-//	VerdictUnknown   拒绝（fail-closed），不可重试
+// 放行/拒绝结论统一取自 verdictDisposition（唯一映射单源，#53）——装饰器
+// AuditGate 与本适配器共用同一张表，两条判定路径不再各判各的：
+//
+//	VerdictAuto   放行
+//	其余合法裁决   拒绝，不可重试（deny=策略否定，重试不会让策略变松；
+//	              need_human/plan_only 的下一步是带外人工动作）
+//	未识别裁决     拒绝且不可重试，理由如实标注「未识别」（新增 Verdict 值
+//	              忘了登记映射时，别让人去修策略，该修的是守卫代码）
 //
 // 需要人工介入的情形一律不可重试：把「需要人」翻译成「多试几次」是退避语义
 // 最常见的误用，重试风暴会一直撞同一堵墙，且把真正的阻塞点埋在日志里。
@@ -53,24 +55,15 @@ func Stage(g *Gate, op Op, onDecision func(Decision)) invoke.Stage {
 				onDecision(d)
 			}
 
-			switch d.Verdict {
-			case VerdictAuto:
+			allow, retryable, known := verdictDisposition(d.Verdict)
+			if allow {
 				return invoke.Verdict{Allow: true, Reason: d.Reason}, nil
-			case VerdictDeny, VerdictPlanOnly, VerdictNeedHuman, VerdictUnknown:
-				return invoke.Verdict{
-					Allow:     false,
-					Reason:    d.Reason,
-					Retryable: false,
-				}, nil
-			default:
-				// 认不出的裁决一律按拒绝且不可重试：猜错的代价不是少放行一次，
-				// 而是把一次策略否定放进无穷重试。
-				return invoke.Verdict{
-					Allow:     false,
-					Reason:    "审计门返回未识别的裁决：" + string(d.Verdict),
-					Retryable: false,
-				}, nil
 			}
+			reason := d.Reason
+			if !known {
+				reason = "审计门返回未识别的裁决：" + string(d.Verdict)
+			}
+			return invoke.Verdict{Allow: false, Reason: reason, Retryable: retryable}, nil
 		},
 	}
 }

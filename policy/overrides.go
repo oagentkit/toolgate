@@ -69,7 +69,7 @@ func LoadOverrides(fsys fs.FS, path string) (*Policy, error) {
 	// 拼错的 verdict fail-fast——启动即败，宁拒不启动不带错跑的既定纪律）
 	for i, r := range p.Rules {
 		if r.Verdict != VerdictUnknown && !isValidVerdict(r.Verdict) {
-			return nil, fmt.Errorf("policy: %s 规则[%d]（%s）verdict %q 非法（auto_proceed|need_human|deny|unknown）",
+			return nil, fmt.Errorf("policy: %s 规则[%d]（%s）verdict %q 非法（auto_proceed|need_human|deny|plan_only|unknown）",
 				path, i, r.ID, r.Verdict)
 		}
 		if r.ID == "" {
