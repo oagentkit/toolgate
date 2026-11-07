@@ -84,8 +84,8 @@ github.com/oagentkit/guardx v0.20.0 h1:Qyyx/CGWHRUfG8kX/IAgehtmRccss7uoz73yr0hO7
 github.com/oagentkit/guardx v0.20.0/go.mod h1:zTTa1PcUN4MYC00vzo9x4hw8568u+tKuAQSFMNQTEx4=
 github.com/oagentkit/mcpkit v0.12.0 h1:spIlvdakLSCBoqa9to+KnXQTM4hN+UpnxAqgaT+LP94=
 github.com/oagentkit/mcpkit v0.12.0/go.mod h1:T18vTbEsaw+8/TqAo1HXy0X4fWw7qmr1QFal8bB4gCM=
-github.com/oagentkit/runtime v0.11.0 h1:YwgTrnA4h4hp2/oQqaqYvUZ2/Ufzt5NAaBv4hkpv5oY=
-github.com/oagentkit/runtime v0.11.0/go.mod h1:eCVueLJvuEDonjF8vlxJCnwnsIjvIHM9Q8yRy1seZdU=
+github.com/oagentkit/runtime v0.12.0 h1:03zltby2Le6F0FUTisxYOaD6Idf9wiqmlNxjvg1EltI=
+github.com/oagentkit/runtime v0.12.0/go.mod h1:GgrSuuzeDEq4UKcDzoHoYXY23EePZXgwBOyAvok2DS8=
 github.com/oekit/concurrency v0.28.0 h1:niGFAbA5s0vuUShofur479ZbzMSw4BtVDEBFb4Bv/3U=
 github.com/oekit/concurrency v0.28.0/go.mod h1:dJ8h++l2iUtRZDxvCIKWv+jth7fO9VlD1IoM+WTW9BY=
 github.com/oekit/pkg v0.37.1 h1:Hq8FJnTtKNTyJ5gNFUl9ORQkM3WwzSriOHnUmF9bbyA=
