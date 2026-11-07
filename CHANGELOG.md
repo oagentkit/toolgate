@@ -2,6 +2,56 @@
 
 > 本文件由 `matrix-tools/scripts/gen_changelogs.py` 从 git 历史生成，按 tag 切段、取每段内的 conventional commit 渲染。
 
+## [v0.15.0] — 2026-11-07
+
+### 新增(invoke)：补搬迁兼容壳——Deprecated 转发 guardx/invoke,旧 import 路径恢复编译（agent#68）
+
+toolgate v0.12.6 起 invoke 子包整体搬至 guardx/invoke,旧 import 路径直接断裂
+且零转发(oagentkit/agent#68)。本壳逐符号别名转发 guardx/invoke 全部导出符号
+(12 type 别名 + 4 哨兵 var + 4 函数),只转发不改语义——含 guardx v0.20.0 起
+Record.Allowed「到达执行体即置位,与执行成败无关」语义(guardx#73),不做任何
+兼容性改写。guardx 本就是本仓矩阵内依赖(v0.20.0),零架构成本。
+搬迁公告(本仓 CHANGELOG 由生成器生成不可手改,三行固定格式记于 invoke/doc.go
+并随本 commit body 收录):
+MovedFrom: github.com/oagentkit/toolgate/invoke
+MovedTo: github.com/oagentkit/guardx/invoke
+兼容期截止版本: v0.16.0(壳随 v0.15.0 提供,保一个完整 minor)
+验证:gofmt -l . 空、go vet ./...、go build ./...、go test ./... 全绿;
+新增 invoke/compat_test.go 以旧 import 路径消费代表性符号并断言与上游同实体。
+未触碰 CHANGELOG.md / go.mod / AGENTS.md / matrix-tools,未打 tag。
+Refs oagentkit/agent#68
+
+- 杂务(deps)：依赖地板追到最新——github.com/oagentkit/guardx v0.21.0
+
+| 依赖 | 现地板 | 抬到 |
+|---|---|---|
+| `github.com/oagentkit/guardx` | `v0.20.0` | `v0.21.0` |
+## 为什么
+矩阵的**发版时刻地板时效**门禁（`verify_tag_floor --ref HEAD`）要求：各仓 HEAD
+（= 下次发版会发出去的内容）的依赖地板，相对那一刻的依赖最新版本，不能已落后。
+oekit 基座与矩阵模块都在高频发版 ⇒ 地板是**跑步机**，落后一格就会判红。
+## 兼容性实测
+本工具在提交前跑完 `go build` / `go vet` / `go test -race -count=1 ./...`（全绿才提交）
+与 `go mod tidy -diff`（无漂移）⇒ 改动**只影响依赖版本**，零行为差异。
+只改 `go.mod` / `go.sum` ⇒ 不需要 CHANGELOG 条目（版本段由下次发版的 `prewrite` 生成）。
+Co-authored-by: Murphy-Yi <zhangyi@Murphy-YideMac-Mini.local>
+
+- 杂务(deps)：依赖地板追到最新——github.com/oagentkit/runtime v0.12.0
+
+| 依赖 | 现地板 | 抬到 |
+|---|---|---|
+| `github.com/oagentkit/runtime` | `v0.11.0` | `v0.12.0` |
+## 为什么
+矩阵的**发版时刻地板时效**门禁（`verify_tag_floor --ref HEAD`）要求：各仓 HEAD
+（= 下次发版会发出去的内容）的依赖地板，相对那一刻的依赖最新版本，不能已落后。
+oekit 基座与矩阵模块都在高频发版 ⇒ 地板是**跑步机**，落后一格就会判红。
+## 兼容性实测
+本工具在提交前跑完 `go build` / `go vet` / `go test -race -count=1 ./...`（全绿才提交）
+与 `go mod tidy -diff`（无漂移）⇒ 改动**只影响依赖版本**，零行为差异。
+只改 `go.mod` / `go.sum` ⇒ 不需要 CHANGELOG 条目（版本段由下次发版的 `prewrite` 生成）。
+Co-authored-by: Murphy-Yi <zhangyi@Murphy-YideMac-Mini.local>
+
+
 ## [v0.14.0] — 2026-11-07
 
 ### 修复(policy)：裁决→放行映射收敛唯一单源，规则合法 verdict 域补 plan_only（#53 #54）
