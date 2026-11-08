@@ -86,10 +86,10 @@ github.com/oagentkit/mcpkit v0.12.1 h1:34y1BzUoiIKUWmRbt6g6dx1ujhrTLIkCXftWgM5ho
 github.com/oagentkit/mcpkit v0.12.1/go.mod h1:DfjzjeOByImKKAcrNjZmnB2e//2KH2jgHtlg3qFapVg=
 github.com/oagentkit/runtime v0.12.1 h1:mS9Sky+ee9GpganNQqHvIQKbjMMbwevh+CgAHISXNfA=
 github.com/oagentkit/runtime v0.12.1/go.mod h1:C0d40llRWRBJMKjy6TnJNNsm7xz36+2eWUOE6k/GT30=
-github.com/oekit/concurrency v0.28.4 h1:BqOy33UttpyyKYGLbBfrhiybVo8ughZVIbzMB3VnGlE=
-github.com/oekit/concurrency v0.28.4/go.mod h1:a3yn4rwxNfDrhdY8X0ypAv4REoEtczqyHPuIajvacu0=
-github.com/oekit/pkg v0.37.4 h1:zc9/GDcZkhyEPISZuQ/v+BBEORed9UiGXY16O0tHOSw=
-github.com/oekit/pkg v0.37.4/go.mod h1:sVeOtmG1sLY2aSnzFIbUAF2Qoh7G8R5vnWtWmLCv8NM=
+github.com/oekit/concurrency v0.29.0 h1:eUUrhGTw+p0ROp/e2DDGBKLUH/wlcpAzndDNKC6U07w=
+github.com/oekit/concurrency v0.29.0/go.mod h1:a3yn4rwxNfDrhdY8X0ypAv4REoEtczqyHPuIajvacu0=
+github.com/oekit/pkg v0.38.0 h1:XjyYEw2sgm6tWsa7tjhtzDVeXyrmlBwfqnR1Z9hvlFY=
+github.com/oekit/pkg v0.38.0/go.mod h1:sVeOtmG1sLY2aSnzFIbUAF2Qoh7G8R5vnWtWmLCv8NM=
 github.com/onsi/ginkgo v1.6.0/go.mod h1:lLunBs/Ym6LB5Z9jYTR76FiuTmxDTDusOGeTQH+WWjE=
 github.com/onsi/ginkgo v1.8.0/go.mod h1:lLunBs/Ym6LB5Z9jYTR76FiuTmxDTDusOGeTQH+WWjE=
 github.com/onsi/gomega v1.5.0/go.mod h1:ex+gbHU/CVuBBDIJjb2X0qEXbFg53c61hWP/1CpauHY=
