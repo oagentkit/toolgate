@@ -2,6 +2,56 @@
 
 > 本文件由 `matrix-tools/scripts/gen_changelogs.py` 从 git 历史生成，按 tag 切段、取每段内的 conventional commit 渲染。
 
+## [v0.16.0] — 2026-11-09
+
+### 修复：toolgate 第三轮 issue 清零（#71 #72 #73）
+
+* fix(policy): 变异工具红线独立于例外规则裁决链，审计如实标红线（#71）
+裁决序曾是「例外规则首个命中即胜 → 矩阵层」，矩阵层 mutating_tool_guard 只在
+零规则命中时可达：一条缺省语义合法的宽松规则（{max_risk: 2, verdict:
+auto_proceed}，未写 op_types/mutating）对 Risk=0 的变异工具调用恒命中并放行，
+「任何模式不可绕过」被击穿，审计还把越权放行记成规则裁决。红线判定前移出
+规则链（例外规则/仲裁插件面前无例外），Decision.RuleID 如实标
+mutating_tool_guard；回归测试覆盖宽松/零约束/点名/need_human/plan_only/
+灰区仲裁/显式 mutating 七种规则形态与装饰器面。
+* fix(policy): AuditGate 拒绝降级为结构化文本观察，不再炸宿主 ReAct 步骤（#72）
+非 auto 裁决此前返回 Go error——eino ToolsNode 对工具 error 直接上抛（节点级
+失败），整个 ReAct 步骤以 NodeRunError 收场，模型永远看不到拒绝理由，与注释
+「降级不中断」承诺相悖。现沿 mcpkit errorAsObservation 同型：非 auto 裁决返回
+以 PolicyRejectedPrefix 开头的结构化文本观察（nil error），含 verdict/rule/
+reason 三要素与换路指引（deny 重试不会变松；need_human/plan_only 走带外人工），
+宿主步骤不中断；裁决全量仍经 onAudit 留痕。硬中断档归 invoke 链 Stage（拒绝
+收口 DenyError，宿主显式装配），stage.go 文档注明两面分工。既有消费方（agentkit
+别名转发）不受签名影响，返回形态变化在 PR 正文标注。
+* fix(policy,toolprior): auditTool/limitedTool 透传 RawToolName，跨包装层不断链（#73）
+mcpkit RawNamer（oagentkit/mcpkit#46）的契约是按名判定的消费方要原始工具名，
+但宿主自然堆叠 invokableTool → AuditGate → LimitCalls → 模型的最外层
+auditTool/limitedTool 只嵌入 InvokableTool、无 RawToolName 透传——
+RawToolNameOf 类型断言断到外层即断链回落 Info().Name，按名白名单/动词启发式/
+审计归类静默拿到带命名空间的暴露名（如 srv.search_docs）全部漏判。两包装层
+补 RawToolName 透传（同 mcpkit selfHealTool 写法，内层非 RawNamer 返回空串），
+并加跨包装层堆叠组合测试（两种装配序）钉住——各自透传只测自家层正是当初漏掉
+组合的原因。RawNamer 语义单源不动（mcpkit 定义、本仓只透传，消费方零改动）。
+
+- 杂务(deps)：依赖地板追到最新——github.com/oagentkit/guardx v0.23.4
+
+| 依赖 | 现地板 | 抬到 |
+|---|---|---|
+| `github.com/oagentkit/guardx` | `v0.23.1` | `v0.23.4` |
+| `github.com/oagentkit/mcpkit` | `v0.12.1` | `v0.12.4` |
+| `github.com/oagentkit/runtime` | `v0.12.1` | `v0.12.4` |
+| `github.com/oekit/concurrency` | `v0.29.0` | `v0.30.1` |
+| `github.com/oekit/pkg` | `v0.38.0` | `v0.39.0` |
+## 为什么
+矩阵的**发版时刻地板时效**门禁（`verify_tag_floor --ref HEAD`）要求：各仓 HEAD
+（= 下次发版会发出去的内容）的依赖地板，相对那一刻的依赖最新版本，不能已落后。
+oekit 基座与矩阵模块都在高频发版 ⇒ 地板是**跑步机**，落后一格就会判红。
+## 兼容性实测
+本工具在提交前跑完 `go build` / `go vet` / `go test -race -count=1 ./...`（全绿才提交）
+与 `go mod tidy -diff`（无漂移）⇒ 改动**只影响依赖版本**，零行为差异。
+只改 `go.mod` / `go.sum` ⇒ 不需要 CHANGELOG 条目（版本段由下次发版的 `prewrite` 生成）。
+
+
 ## [v0.15.3] — 2026-11-08
 
 - 杂务(deps)：依赖地板追平——pkg v0.38.0 / logx v0.8.11 / concurrency v0.29.0
