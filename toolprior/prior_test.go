@@ -8,7 +8,20 @@ import (
 
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/schema"
+
+	"github.com/oagentkit/mcpkit/mcp"
 )
+
+// rawNamedTool 带 RawToolName 的工具替身（模拟 mcp.Pool 出口工具：暴露名带
+// server 命名空间，原始名才是按名判定消费方要的，oagentkit/mcpkit#46）。
+type rawNamedTool struct {
+	*fakeTool
+	raw string
+}
+
+func (f *rawNamedTool) RawToolName() string { return f.raw }
+
+var _ mcp.RawNamer = (*rawNamedTool)(nil)
 
 // fakeTool 假工具。
 type fakeTool struct {
@@ -140,6 +153,25 @@ func TestWithCallLimitZero(t *testing.T) {
 		if _, err := lt.InvokableRun(context.Background(), "{}"); err != nil {
 			t.Fatalf("不限制时不应报错: %v", err)
 		}
+	}
+}
+
+// TestLimitCallsRawToolNamePassthrough（toolgate#73）：limitedTool 包装层透传
+// 原始工具名——宿主自然堆叠 invokableTool → AuditGate → LimitCalls → 模型时
+// 最外层是本包装，不透传则 RawToolNameOf 的类型断言断到外层即断链，按名判定
+// 的消费方（只读白名单/动词启发式/审计归类）静默拿到带命名空间的暴露名。
+// 跨包装层组合断言见 policy 包 TestRawToolNameAcrossWrappedStack。
+func TestLimitCallsRawToolNamePassthrough(t *testing.T) {
+	inner := &rawNamedTool{fakeTool: &fakeTool{name: "srv.search_docs"}, raw: "search_docs"}
+	limited := LimitCalls(inner, 2)
+	if got := mcp.RawToolNameOf(limited); got != "search_docs" {
+		t.Fatalf("包装后最外层应取到原始名，got %q（want search_docs）", got)
+	}
+	// 内层非 RawNamer：空串=无原始名可用（同 mcpkit selfHealTool 契约；不得
+	// 谎报暴露名为原始名，消费方对空串不得放行）。
+	plain := LimitCalls(&fakeTool{name: "get_x"}, 2)
+	if got := mcp.RawToolNameOf(plain); got != "" {
+		t.Fatalf("内层非 RawNamer 应返回空串，got %q", got)
 	}
 }
 

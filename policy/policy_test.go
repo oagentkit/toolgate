@@ -170,3 +170,63 @@ func TestModeNormalize(t *testing.T) {
 		t.Fatal("空串/大小写不一致应非法（严格校验）")
 	}
 }
+
+// TestRedLineNotBypassableByRules（toolgate#71）：变异工具红线独立于规则裁决链
+// ——此前裁决序「例外规则首个命中即胜 → 矩阵层」下，矩阵层的 mutating_tool_guard
+// 只在零规则命中时可达，一条缺省语义合法的宽松规则（如 {max_risk: 2,
+// verdict: auto_proceed}，未写 op_types/mutating/min_risk）对 Risk=0 的变异工具
+// 调用恒命中并放行，「任何模式不可绕过」的硬不变量被击穿，审计还把越权放行记成
+// 规则裁决（Decider=rule、RuleID=规则 id）。红线面前无例外：例外规则无论怎么写
+// （放行/人审/降级/灰区仲裁）都到不了变异调用。
+func TestRedLineNotBypassableByRules(t *testing.T) {
+	yes := true
+	cases := []struct {
+		name    string
+		rules   []Rule
+		arbiter Arbiter
+	}{
+		{"宽松规则 max_risk+auto（issue 复现形态）", []Rule{{ID: "fast-track", MaxRisk: 2, Verdict: VerdictAuto}}, nil},
+		{"零约束 auto 规则吞掉一切未评级操作", []Rule{{ID: "allow-all", Verdict: VerdictAuto}}, nil},
+		{"规则点名放行该变异工具", []Rule{{ID: "allow-shell", Tools: []string{"shell_execute"}, Verdict: VerdictAuto}}, nil},
+		{"need_human 规则（红线语义不受规则软化）", []Rule{{ID: "soften", Tools: []string{"shell_execute"}, Verdict: VerdictNeedHuman}}, nil},
+		{"plan_only 规则", []Rule{{ID: "downgrade", Tools: []string{"shell_execute"}, Verdict: VerdictPlanOnly}}, nil},
+		{"灰区规则+仲裁插件判 auto", []Rule{{ID: "gray", Verdict: VerdictUnknown}}, stubArbiter{v: VerdictAuto, reason: "仲裁说语义只读"}},
+		{"规则显式写 mutating:true 也不改红线出口", []Rule{{ID: "explicit", OpTypes: []string{string(OpToolCall)}, Mutating: &yes, Verdict: VerdictAuto}}, nil},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			pol := DefaultPolicy()
+			pol.Rules = c.rules
+			got := NewGate(pol, c.arbiter).Decide(context.Background(),
+				Op{Type: OpToolCall, Mode: ModeAuto, Tool: "shell_execute", Mutating: true})
+			if got.Verdict != VerdictDeny {
+				t.Fatalf("红线面前例外规则不可豁免，实得 %+v", got)
+			}
+			// 审计如实标注：RuleID 是红线而非命中规则——越权放行不得记成合规裁量。
+			if got.RuleID != "mutating_tool_guard" {
+				t.Fatalf("审计应如实标红线 mutating_tool_guard，实得 RuleID=%s", got.RuleID)
+			}
+		})
+	}
+	// 装饰器面同样如实标红线：宽松规则在场时变异调用仍被拦、执行体零触达，
+	// 留痕指向红线而非命中规则；拒绝形态为结构化观察（#72 契约）。
+	inner := &fakeTool{name: "shell_execute"}
+	var got Decision
+	pol := DefaultPolicy()
+	pol.Rules = []Rule{{ID: "fast-track", MaxRisk: 2, Verdict: VerdictAuto}}
+	out, err := AuditGate(NewGate(pol, nil),
+		Op{Type: OpToolCall, Mode: ModeAuto, Tool: "shell_execute", Mutating: true},
+		func(_ Op, dec Decision) { got = dec }, inner).InvokableRun(context.Background(), "{}")
+	assertRejectedObservation(t, out, err, "mutating_tool_guard")
+	if inner.called || got.Verdict != VerdictDeny || got.RuleID != "mutating_tool_guard" {
+		t.Fatalf("装饰器面红线拦截且审计如实标注，实得 called=%v %+v", inner.called, got)
+	}
+	// 对照组：同一宽松规则对非变异采集调用照常生效（修复不误伤规则本义）。
+	pol2 := DefaultPolicy()
+	pol2.Rules = []Rule{{ID: "fast-track", MaxRisk: 2, Verdict: VerdictAuto, Reason: "低风险代批"}}
+	dec := NewGate(pol2, nil).Decide(context.Background(),
+		Op{Type: OpToolCall, Mode: ModeAuto, Tool: "search_docs"})
+	if dec.Verdict != VerdictAuto || dec.RuleID != "fast-track" {
+		t.Fatalf("宽松规则对非变异调用应照常生效，实得 %+v", dec)
+	}
+}
