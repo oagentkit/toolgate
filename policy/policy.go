@@ -1,10 +1,12 @@
 // Package policy 操作审计门：多种会话执行策略模式（confirm/auto/plan/full）下的
 // 统一操作裁决——每个操作必过、三值裁决、全程留痕。模式改变的是裁决策略，不是移除
-// 审计点；红线（变异工具拒绝、高危恒人审）在矩阵层硬编码，任何模式不可绕过。
+// 审计点；红线（变异工具拒绝、高危恒人审）硬编码，任何模式不可绕过。
 //
-// 裁决分层：例外规则（Policy.Rules，首个命中即胜）→ 模式×风险矩阵 → 兜底 need_human
-// （未知形态 fail-safe）。灰区可挂 Arbiter 仲裁插件，失败/非法输出一律 fail-safe 升人审
-// ——「只升不降」在 fail-safe 方向恒成立。工具调用面的装饰器见 AuditGate。
+// 裁决分层：红线（变异工具拒绝，独立于规则链前置硬判，oagentkit/toolgate#71——
+// 例外规则/仲裁插件面前无例外）→ 例外规则（Policy.Rules，首个命中即胜）→
+// 模式×风险矩阵 → 兜底 need_human（未知形态 fail-safe）。灰区可挂 Arbiter 仲裁
+// 插件，失败/非法输出一律 fail-safe 升人审——「只升不降」在 fail-safe 方向恒成立。
+// 工具调用面的装饰器见 AuditGate。
 //
 // 沉淀自 bianque engine/policy（v0.9.6）：领域包 yaml 路径约定改为显式入参
 // （LoadOverrides path），其余原样。
@@ -153,8 +155,20 @@ func NewGate(p *Policy, a Arbiter) *Gate {
 	return &Gate{policy: p, arbiter: a}
 }
 
-// Decide 裁决：例外规则 → 矩阵层 → 兜底 need_human（未知形态 fail-safe）。
+// Decide 裁决：红线（独立于规则链前置硬判）→ 例外规则 → 矩阵层 → 兜底
+// need_human（未知形态 fail-safe）。
 func (g *Gate) Decide(ctx context.Context, op Op) Decision {
+	// 红线前置、独立于规则裁决链（oagentkit/toolgate#71）：裁决序曾是「例外规则
+	// 首个命中即胜 → 矩阵层」，矩阵层的 mutating_tool_guard 只在零规则命中时可达——
+	// 一条缺省语义合法的宽松规则（如 {max_risk: 2, verdict: auto_proceed}，未写
+	// op_types/mutating）对 Risk=0 的变异工具调用恒命中并放行，「任何模式不可绕过」
+	// 的硬不变量被击穿，审计还把越权放行记成规则裁决（Decider=rule、RuleID=规则 id）。
+	// 红线面前无例外：判定移出规则链，例外规则/仲裁插件无论产出什么都到不了这里；
+	// 审计 RuleID 如实标 mutating_tool_guard，不再谎报成规则裁量。
+	if op.Type == OpToolCall && op.Mutating {
+		return Decision{Verdict: VerdictDeny, Decider: DeciderRule, RuleID: "mutating_tool_guard",
+			Reason: "采集面工具命中变异动词段：变更必须走方案审批面，LLM 自主变异调用一律拒绝（任何模式；红线面前例外规则不可豁免，#71）"}
+	}
 	for _, r := range g.policy.Rules {
 		if !r.matches(op) {
 			continue
@@ -186,10 +200,9 @@ func (g *Gate) Decide(ctx context.Context, op Op) Decision {
 	}
 	switch op.Type {
 	case OpToolCall:
-		if op.Mutating {
-			return Decision{Verdict: VerdictDeny, Decider: DeciderRule, RuleID: "mutating_tool_guard",
-				Reason: "采集面工具命中变异动词段：变更必须走方案审批面，LLM 自主变异调用一律拒绝（任何模式）"}
-		}
+		// 变异工具已在红线前置段拒绝（#71）：走到这里的只剩非变异（未评级/只读）
+		// 采集调用。留在此处的矩阵分支是只读白名单放行，别在此再加可被规则绕过的
+		// 变异判断——红线只有 Decide 开头一处，两处各判各的迟早漂移（#40 教训）。
 		return Decision{Verdict: VerdictAuto, Decider: DeciderRule, RuleID: "readonly_allowlist", Reason: "白名单内只读采集工具"}
 	case OpExecuteStep:
 		if op.Mode == ModePlan {
