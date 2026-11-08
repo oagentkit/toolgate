@@ -72,6 +72,18 @@ func AuditGate(g *Gate, op Op, onAudit func(Op, Decision), t tool.InvokableTool)
 	return auditTool{gate: g, op: op, onAudit: onAudit, InvokableTool: t}
 }
 
+// RawToolName 透传原始工具名（oagentkit/toolgate#73，契约单源 mcpkit RawNamer
+// /oagentkit/mcpkit#46）：宿主自然堆叠 invokableTool → AuditGate → 模型时最外层
+// 是本包装，不透传则 RawToolNameOf 的类型断言断到外层即断链，按名判定的消费方
+// （动词启发式/只读白名单/审计归类）静默拿到带命名空间的暴露名。内层非 RawNamer
+// 返回空串（同 mcpkit selfHealTool 写法：空串=无原始名可用，消费方不得据此放行）。
+func (t auditTool) RawToolName() string {
+	if rn, ok := t.InvokableTool.(mcp.RawNamer); ok {
+		return rn.RawToolName()
+	}
+	return ""
+}
+
 // OutputSchema 出参 schema 透传（v0.12.5 OutputSchemer 可选能力面）。
 func (t auditTool) OutputSchema() json.RawMessage {
 	if o, ok := t.InvokableTool.(mcp.OutputSchemer); ok {
