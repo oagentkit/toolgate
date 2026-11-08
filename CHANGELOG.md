@@ -4,9 +4,7 @@
 
 ## [v0.15.3] — 2026-11-08
 
-### 依赖地板：oekit 基座追平——pkg v0.38.0 / logx v0.8.11 / concurrency v0.29.0
-
-oekit BOM v0.2.11 兼容地板门禁（oekit#163）对齐轮；无代码变更。
+- 杂务(deps)：依赖地板追平——pkg v0.38.0 / logx v0.8.11 / concurrency v0.29.0
 
 ## [v0.15.2] — 2026-11-08
 
