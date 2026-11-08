@@ -209,14 +209,15 @@ func TestRedLineNotBypassableByRules(t *testing.T) {
 		})
 	}
 	// 装饰器面同样如实标红线：宽松规则在场时变异调用仍被拦、执行体零触达，
-	// 留痕指向红线而非命中规则（拒绝的返回形态属 #72 契约，在 toolgate_test 断言）。
+	// 留痕指向红线而非命中规则；拒绝形态为结构化观察（#72 契约）。
 	inner := &fakeTool{name: "shell_execute"}
 	var got Decision
 	pol := DefaultPolicy()
 	pol.Rules = []Rule{{ID: "fast-track", MaxRisk: 2, Verdict: VerdictAuto}}
-	AuditGate(NewGate(pol, nil),
+	out, err := AuditGate(NewGate(pol, nil),
 		Op{Type: OpToolCall, Mode: ModeAuto, Tool: "shell_execute", Mutating: true},
 		func(_ Op, dec Decision) { got = dec }, inner).InvokableRun(context.Background(), "{}")
+	assertRejectedObservation(t, out, err, "mutating_tool_guard")
 	if inner.called || got.Verdict != VerdictDeny || got.RuleID != "mutating_tool_guard" {
 		t.Fatalf("装饰器面红线拦截且审计如实标注，实得 called=%v %+v", inner.called, got)
 	}

@@ -29,15 +29,36 @@ func (f *fakeTool) InvokableRun(_ context.Context, _ string, _ ...tool.Option) (
 // 编译期确认实现 InvokableTool（Info+InvokableRun）。
 var _ tool.InvokableTool = (*fakeTool)(nil)
 
+// assertRejectedObservation 断言一次装饰器面拒绝的完整形态（#72 契约）：
+// nil error（不炸宿主 ReAct 步骤）+ 以 PolicyRejectedPrefix 开头的结构化文本
+// 观察（模型可见裁决与理由、可换路）。
+func assertRejectedObservation(t *testing.T, out string, err error, wantRule string) {
+	t.Helper()
+	if err != nil {
+		t.Fatalf("拒绝应降级为文本观察而非 error（eino ToolsNode 会把 error 上抛炸掉整个步骤，#72）: %v", err)
+	}
+	if !strings.HasPrefix(out, PolicyRejectedPrefix) {
+		t.Fatalf("拒绝应返回以 %s 开头的结构化观察: %q", PolicyRejectedPrefix, out)
+	}
+	if !strings.Contains(out, "verdict=") || !strings.Contains(out, "rule=") {
+		t.Fatalf("观察应含 verdict/rule 结构化字段: %q", out)
+	}
+	if wantRule != "" && !strings.Contains(out, wantRule) {
+		t.Fatalf("观察应能定位到规则/红线 %s: %q", wantRule, out)
+	}
+	if !strings.Contains(out, "不要换参数重试") {
+		t.Fatalf("观察应带换路指引（deny 重试不会变松；need_human 走带外人工）: %q", out)
+	}
+}
+
 func TestWithAuditGateDeniesMutatingCall(t *testing.T) {
 	inner := &fakeTool{name: "shell_execute"}
 	var got Decision
 	wrapped := AuditGate(NewGate(nil, nil),
 		Op{Type: OpToolCall, Mode: ModeConfirm, Tool: "shell_execute", Mutating: true},
 		func(_ Op, dec Decision) { got = dec }, inner)
-	if _, err := wrapped.InvokableRun(context.Background(), "{}"); err == nil {
-		t.Fatal("采集面变异工具调用应被拒绝")
-	}
+	out, err := wrapped.InvokableRun(context.Background(), "{}")
+	assertRejectedObservation(t, out, err, "mutating_tool_guard")
 	if inner.called {
 		t.Fatal("被拒绝的调用不应触达底层工具")
 	}
@@ -73,19 +94,23 @@ func TestWithAuditGateNilGatePassthrough(t *testing.T) {
 	}
 }
 
-// TestAuditGateFailClosed（toolgate#40/#53）：非 VerdictAuto 一律拒绝且执行体
-// 零触达——放行/拒绝结论取自唯一映射单源 verdictDisposition，与 Stage 同表。
-// 裁决注入走宿主真实表达路径：规则面（deny/need_human/plan_only，#54 起
-// plan_only 可由规则直产）与矩阵面（plan 模式提审恒 plan_only）。
+// TestAuditGateFailClosed（toolgate#40/#53/#72）：非 VerdictAuto 一律拒绝且执行体
+// 零触达——放行/拒绝结论取自唯一映射单源 verdictDisposition，与 Stage 同表。拒绝
+// 形态为结构化文本观察（nil error，#72「降级不中断」）：eino ToolsNode 对工具
+// error 直接上抛、整个 ReAct 步骤以 NodeRunError 收场，模型永远看不到拒绝理由；
+// 观察文本则模型可见裁决与规则定位、可换路。裁决注入走宿主真实表达路径：规则面
+// （deny/need_human/plan_only，#54 起 plan_only 可由规则直产）与矩阵面（plan 模式
+// 提审恒 plan_only）。
 func TestAuditGateFailClosed(t *testing.T) {
 	type row struct {
 		name string
 		g    *Gate
 		op   Op
-		id   string // 拒绝错误应能定位到的规则 id
+		id   string // 拒绝观察应能定位到的规则 id
 	}
 	// 规则面注入。Mutating 故意置 false：若规则注入失效，裁决会落回只读白名单
-	// 放行、本测当场红——置 true 则矩阵层兜底 deny，测的其实是矩阵不是规则注入。
+	// 放行、本测当场红——置 true 则红线前置兜底 deny（#71），测的其实是红线不是
+	// 规则注入。
 	mkRule := func(v Verdict) row {
 		id := "rule-" + string(v)
 		p := DefaultPolicy()
@@ -103,13 +128,8 @@ func TestAuditGateFailClosed(t *testing.T) {
 	} {
 		t.Run(r.name, func(t *testing.T) {
 			inner := &fakeTool{name: r.op.Tool}
-			_, err := AuditGate(r.g, r.op, nil, inner).InvokableRun(context.Background(), "{}")
-			if err == nil {
-				t.Fatal("非 auto 裁决应拒绝执行")
-			}
-			if !strings.Contains(err.Error(), r.id) {
-				t.Fatalf("错误应带规则 id %s: %v", r.id, err)
-			}
+			out, err := AuditGate(r.g, r.op, nil, inner).InvokableRun(context.Background(), "{}")
+			assertRejectedObservation(t, out, err, r.id)
 			if inner.called {
 				t.Fatal("被拒调用不得触达执行体")
 			}
@@ -153,10 +173,12 @@ func TestVerdictDispositionSingleSource(t *testing.T) {
 	}
 }
 
-// TestAuditFacesAgreeOnEveryProducibleVerdict（#53）：装饰器与 Stage 是同一张
+// TestAuditFacesAgreeOnEveryProducibleVerdict（#53/#72）：装饰器与 Stage 是同一张
 // 映射表（verdictDisposition）的两个出口——对 Gate 能产出的每一类裁决，两面
-// 必须同放行/同拒绝、同触达执行体，Stage 面的拒绝一律不可重试。#40 的形态
-// 就是「一面修了另一面没修」：此测红 = 判定又漂移回两张表了。
+// 必须同放行/同拒绝、同触达执行体。拒绝形态按各自面语义收口（#72）：装饰器=
+// 结构化文本观察（nil error，模型可见可换路），Stage 链=DenyError 硬中断且
+// 一律不可重试。#40 的形态就是「一面修了另一面没修」：此测红 = 判定又漂移回
+// 两张表了。
 func TestAuditFacesAgreeOnEveryProducibleVerdict(t *testing.T) {
 	ruleGate := func(v Verdict) *Gate {
 		p := DefaultPolicy()
@@ -175,18 +197,26 @@ func TestAuditFacesAgreeOnEveryProducibleVerdict(t *testing.T) {
 		{"plan_only 矩阵", NewGate(nil, nil), Op{Type: OpPlanSubmit, Mode: ModePlan, Risk: 2, Tool: "restart_all"}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			// 装饰器面
+			// 装饰器面：拒绝=文本观察（nil error）
 			inner := &fakeTool{name: c.op.Tool}
-			_, decErr := AuditGate(c.g, c.op, nil, inner).InvokableRun(context.Background(), "{}")
-			// Stage 面
+			out, decErr := AuditGate(c.g, c.op, nil, inner).InvokableRun(context.Background(), "{}")
+			if decErr != nil {
+				t.Fatalf("装饰器拒绝不得返回 error（#72）: %v", decErr)
+			}
+			decRejected := strings.HasPrefix(out, PolicyRejectedPrefix)
+			// Stage 面：拒绝=DenyError 硬中断
 			hits := 0
 			ch := chainWith(t, Stage(c.g, c.op, nil), &hits)
 			_, stErr := ch.Do(context.Background(), invoke.Call{Name: c.op.Tool})
-			if (decErr == nil) != (stErr == nil) {
-				t.Fatalf("两面结论漂移: 装饰器 err=%v, Stage err=%v", decErr, stErr)
+			if decRejected != (stErr != nil) {
+				t.Fatalf("两面结论漂移: 装饰器拒绝=%v（out=%q）, Stage 拒绝=%v（err=%v）",
+					decRejected, out, stErr != nil, stErr)
 			}
 			if inner.called != (hits > 0) {
 				t.Fatalf("执行体触达漂移: 装饰器触达=%v, Stage 触达=%d 次", inner.called, hits)
+			}
+			if !decRejected && !inner.called {
+				t.Fatal("放行面应真实触达执行体（对照组）")
 			}
 			if stErr != nil && invoke.Retryable(stErr) {
 				t.Fatal("审计门拒绝不可重试")

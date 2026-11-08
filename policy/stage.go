@@ -16,6 +16,12 @@ import (
 //
 // 故两者并存：AuditGate 保留以兼容既有调用点，**新代码的审计门走这里**。
 //
+// 两面拒绝语义分工（oagentkit/toolgate#72）：装饰器对非 auto 裁决返回结构化
+// 文本观察（nil error）——模型可见裁决与理由、可换路，宿主 ReAct 步骤不中断
+// （工具 error 会被 eino ToolsNode 直接上抛炸掉整个步骤）；本适配器（invoke 链）
+// 才是硬中断档——拒绝收口为 DenyError，由宿主显式装配。放行/拒绝结论两面共用
+// verdictDisposition 一张表（#53）。
+//
 // # Op 的取法
 //
 // op 是**模板**：Type / Mode / Risk / Mutating 在装配期固化（它们按调用点是静态可判的），
