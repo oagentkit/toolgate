@@ -24,9 +24,10 @@ func TestDecideMatrix(t *testing.T) {
 		{"full L3→代批", Op{Type: OpPlanSubmit, Mode: ModeFull, Risk: 3}, VerdictAuto, "full_matrix"},
 		{"full L4→人审（双确认不豁免）", Op{Type: OpPlanSubmit, Mode: ModeFull, Risk: 4}, VerdictNeedHuman, "full_matrix"},
 		{"plan L1→只审不执行", Op{Type: OpPlanSubmit, Mode: ModePlan, Risk: 1}, VerdictPlanOnly, "plan_mode"},
-		{"采集面只读→放行", Op{Type: OpToolCall, Mode: ModeConfirm, Tool: "get_load"}, VerdictAuto, "readonly_allowlist"},
-		{"采集面变异→拒绝（任何模式）", Op{Type: OpToolCall, Mode: ModeFull, Tool: "shell_execute", Mutating: true}, VerdictDeny, "mutating_tool_guard"},
-		{"执行面已批准步骤→放行", Op{Type: OpExecuteStep, Mode: ModeAuto, Tool: "shell_execute", Mutating: true}, VerdictAuto, "approved_plan"},
+		{"采集面只读→放行", Op{Type: OpToolCall, Mode: ModeConfirm, Tool: "get_load", Mutating: Mutating(false)}, VerdictAuto, "not_classified_as_mutating"},
+		{"采集面未标记变更性→fail-safe 人审", Op{Type: OpToolCall, Mode: ModeConfirm, Tool: "mystery_tool"}, VerdictNeedHuman, "mutating_unclassified"},
+		{"采集面变异→拒绝（任何模式）", Op{Type: OpToolCall, Mode: ModeFull, Tool: "shell_execute", Mutating: Mutating(true)}, VerdictDeny, "mutating_tool_guard"},
+		{"执行面已批准步骤→放行", Op{Type: OpExecuteStep, Mode: ModeAuto, Tool: "shell_execute", Mutating: Mutating(true)}, VerdictAuto, "approved_plan"},
 		{"未知操作类型→fail-safe 人审", Op{Type: "weird", Mode: ModeFull}, VerdictNeedHuman, "unknown_op"},
 	}
 	for _, tc := range cases {
@@ -103,14 +104,14 @@ func TestRuleVerdictPlanOnlyIsLegal(t *testing.T) {
 		{ID: "prod-change-plan-only", Tools: []string{"restart_service"}, Verdict: VerdictPlanOnly, Reason: "生产变更只审不执行"},
 	}}
 	got := NewGate(pol, nil).Decide(context.Background(),
-		Op{Type: OpToolCall, Mode: ModeFull, Tool: "restart_service"})
+		Op{Type: OpToolCall, Mode: ModeFull, Tool: "restart_service", Mutating: Mutating(false)})
 	if got.Verdict != VerdictPlanOnly || got.Decider != DeciderRule || got.RuleID != "prod-change-plan-only" {
 		t.Fatalf("plan_only 规则应原样产出降级裁决, got %+v", got)
 	}
 	// 拼错的 verdict 仍走 fail-safe 升人审（合法域扩员不等于放弃校验）
 	pol.Rules = []Rule{{ID: "typo", Tools: []string{"restart_service"}, Verdict: Verdict("plan_onli")}}
 	got = NewGate(pol, nil).Decide(context.Background(),
-		Op{Type: OpToolCall, Mode: ModeAuto, Tool: "restart_service"})
+		Op{Type: OpToolCall, Mode: ModeAuto, Tool: "restart_service", Mutating: Mutating(false)})
 	if got.Verdict != VerdictNeedHuman || !strings.Contains(got.Reason, "非法") {
 		t.Fatalf("拼错的 verdict 应 fail-safe 升人审, got %+v", got)
 	}
@@ -130,7 +131,9 @@ func TestUnknownRuleArbiter(t *testing.T) {
 	pol := &Policy{AutoMaxRisk: 2, FullMaxRisk: 3, Rules: []Rule{
 		{ID: "gray", Verdict: VerdictUnknown, Reason: "灰区"},
 	}}
-	op := Op{Type: OpToolCall, Mode: ModeConfirm, Tool: "weird_tool"}
+	// Mutating 显式 false（#85 三态）：nil 未标记会在 fail-safe 段升人审，
+	// 规则链/仲裁路径根本不可达——本测要打的是仲裁路径，必须绕开前置段。
+	op := Op{Type: OpToolCall, Mode: ModeConfirm, Tool: "weird_tool", Mutating: Mutating(false)}
 	t.Run("无仲裁器 fail-safe 升人审", func(t *testing.T) {
 		got := NewGate(pol, nil).Decide(context.Background(), op)
 		if got.Verdict != VerdictNeedHuman || got.Decider != DeciderRule {
@@ -198,7 +201,7 @@ func TestRedLineNotBypassableByRules(t *testing.T) {
 			pol := DefaultPolicy()
 			pol.Rules = c.rules
 			got := NewGate(pol, c.arbiter).Decide(context.Background(),
-				Op{Type: OpToolCall, Mode: ModeAuto, Tool: "shell_execute", Mutating: true})
+				Op{Type: OpToolCall, Mode: ModeAuto, Tool: "shell_execute", Mutating: Mutating(true)})
 			if got.Verdict != VerdictDeny {
 				t.Fatalf("红线面前例外规则不可豁免，实得 %+v", got)
 			}
@@ -215,17 +218,18 @@ func TestRedLineNotBypassableByRules(t *testing.T) {
 	pol := DefaultPolicy()
 	pol.Rules = []Rule{{ID: "fast-track", MaxRisk: 2, Verdict: VerdictAuto}}
 	out, err := AuditGate(NewGate(pol, nil),
-		Op{Type: OpToolCall, Mode: ModeAuto, Tool: "shell_execute", Mutating: true},
+		Op{Type: OpToolCall, Mode: ModeAuto, Tool: "shell_execute", Mutating: Mutating(true)},
 		func(_ Op, dec Decision) { got = dec }, inner).InvokableRun(context.Background(), "{}")
 	assertRejectedObservation(t, out, err, "mutating_tool_guard")
 	if inner.called || got.Verdict != VerdictDeny || got.RuleID != "mutating_tool_guard" {
 		t.Fatalf("装饰器面红线拦截且审计如实标注，实得 called=%v %+v", inner.called, got)
 	}
-	// 对照组：同一宽松规则对非变异采集调用照常生效（修复不误伤规则本义）。
+	// 对照组：同一宽松规则对显式声明非变异的采集调用照常生效（修复不误伤
+	// 规则本义）。
 	pol2 := DefaultPolicy()
 	pol2.Rules = []Rule{{ID: "fast-track", MaxRisk: 2, Verdict: VerdictAuto, Reason: "低风险代批"}}
 	dec := NewGate(pol2, nil).Decide(context.Background(),
-		Op{Type: OpToolCall, Mode: ModeAuto, Tool: "search_docs"})
+		Op{Type: OpToolCall, Mode: ModeAuto, Tool: "search_docs", Mutating: Mutating(false)})
 	if dec.Verdict != VerdictAuto || dec.RuleID != "fast-track" {
 		t.Fatalf("宽松规则对非变异调用应照常生效，实得 %+v", dec)
 	}

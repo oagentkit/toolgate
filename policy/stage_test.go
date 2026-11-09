@@ -24,7 +24,7 @@ func chainWith(t *testing.T, s invoke.Stage, hits *int) *invoke.Chain {
 // 用真实的内置策略判定，不构造桩 Arbiter——桩只能证明桩自己的行为。
 func TestStageAllowsReadonlyToolCall(t *testing.T) {
 	hits := 0
-	c := chainWith(t, Stage(NewGate(nil, nil), Op{Type: OpToolCall, Mode: ModeAuto}, nil), &hits)
+	c := chainWith(t, Stage(NewGate(nil, nil), Op{Type: OpToolCall, Mode: ModeAuto, Mutating: Mutating(false)}, nil), &hits)
 	if _, err := c.Do(context.Background(), invoke.Call{Name: "read_logs"}); err != nil {
 		t.Fatalf("只读采集面应放行，实得 %v", err)
 	}
@@ -37,7 +37,7 @@ func TestStageAllowsReadonlyToolCall(t *testing.T) {
 // 这是适配器的核心承诺：把审计门搬上链之后，拒绝是真的拦住了。
 func TestStageDeniesMutatingToolCall(t *testing.T) {
 	hits := 0
-	c := chainWith(t, Stage(NewGate(nil, nil), Op{Type: OpToolCall, Mode: ModeFull, Mutating: true}, nil), &hits)
+	c := chainWith(t, Stage(NewGate(nil, nil), Op{Type: OpToolCall, Mode: ModeFull, Mutating: Mutating(true)}, nil), &hits)
 
 	_, err := c.Do(context.Background(), invoke.Call{Name: "restart_service"})
 	if err == nil {
@@ -105,7 +105,7 @@ func TestStageRuleVerdictDrivesDecision(t *testing.T) {
 	}, nil)
 
 	hits := 0
-	c := chainWith(t, Stage(g, Op{Type: OpToolCall, Mode: ModeAuto, Mutating: no}, nil), &hits)
+	c := chainWith(t, Stage(g, Op{Type: OpToolCall, Mode: ModeAuto, Mutating: Mutating(no)}, nil), &hits)
 
 	// 目录内的普通工具：放行。
 	if _, err := c.Do(context.Background(), invoke.Call{Name: "read_logs"}); err != nil {
@@ -124,7 +124,7 @@ func TestStageRuleVerdictDrivesDecision(t *testing.T) {
 func TestStageReportsDecisionToCallback(t *testing.T) {
 	var got []Decision
 	hits := 0
-	c := chainWith(t, Stage(NewGate(nil, nil), Op{Type: OpToolCall, Mode: ModeFull, Mutating: true},
+	c := chainWith(t, Stage(NewGate(nil, nil), Op{Type: OpToolCall, Mode: ModeFull, Mutating: Mutating(true)},
 		func(d Decision) { got = append(got, d) }), &hits)
 
 	if _, err := c.Do(context.Background(), invoke.Call{Name: "restart_service"}); err == nil {
@@ -144,7 +144,7 @@ func TestStageReportsDecisionToCallback(t *testing.T) {
 // TestStageNilGateDoesNotBlock 未装配审计门 = 存量行为，放行但环仍在链上。
 func TestStageNilGateDoesNotBlock(t *testing.T) {
 	hits := 0
-	c := chainWith(t, Stage(nil, Op{Type: OpToolCall, Mode: ModeAuto}, nil), &hits)
+	c := chainWith(t, Stage(nil, Op{Type: OpToolCall, Mode: ModeAuto, Mutating: Mutating(false)}, nil), &hits)
 
 	if _, err := c.Do(context.Background(), invoke.Call{Name: "t"}); err != nil {
 		t.Fatalf("未装配审计门应放行（存量行为），实得 %v", err)
