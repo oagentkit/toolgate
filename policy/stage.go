@@ -20,13 +20,44 @@ import (
 // 文本观察（nil error）——模型可见裁决与理由、可换路，宿主 ReAct 步骤不中断
 // （工具 error 会被 eino ToolsNode 直接上抛炸掉整个步骤）；本适配器（invoke 链）
 // 才是硬中断档——拒绝收口为 DenyError，由宿主显式装配。放行/拒绝结论两面共用
-// verdictDisposition 一张表（#53）。
+// verdictDisposition 一张表（#53）。装配可选项见 StageOption / WithMutatingClassifier。
+
+// StageOption Stage 装配可选项。
+type StageOption func(*stageConfig)
+
+// stageConfig Stage 装配配置（零值 = 全部缺省）。
+type stageConfig struct {
+	classifyMutating func(tool string) *bool
+}
+
+// WithMutatingClassifier 按实际工具名重算变更标记的分类器（oagentkit/toolgate#85）。
+// 通常传 agentrun.IsMutatingTool（变异动词段表在调用方侧，policy 不跨模块
+// 依赖）。未提供时模板的 Mutating 原样生效——模板也未标记（nil）的 tool_call
+// 由 Decide fail-safe 升人审。
+func WithMutatingClassifier(classify func(tool string) bool) StageOption {
+	return func(c *stageConfig) {
+		c.classifyMutating = func(tool string) *bool {
+			b := classify(tool)
+			return &b
+		}
+	}
+}
+
+// Stage 把操作审计门接成 invoke 链上的一环（为什么需要链上适配、两面拒绝
+// 语义分工见文件头部注释）。
 //
 // # Op 的取法
 //
-// op 是**模板**：Type / Mode / Risk / Mutating 在装配期固化（它们按调用点是静态可判的），
+// op 是**模板**：Type / Mode / Risk 在装配期固化（它们按调用点是静态可判的），
 // Tool 每次由链上的实际调用覆盖。这样一个 stage 能服务同一调用点下的多个工具，
 // 不必为每个工具各装配一次。
+//
+// Mutating 同为模板字段，但**换工具名必须重算**（oagentkit/toolgate#85）：
+// 模板期标记描述的是装配时的工具，链上实际调用的工具可以不同——此前覆盖
+// Tool 时不重算，模板声明「非变更」的 stage 换成 delete_repository 照样放行，
+// 红线被模板期标记与实际工具的脱节绕过。经 WithMutatingClassifier 提供分类器
+// 后，每次调用按实际工具名重算；未提供分类器且模板未标记（nil）时，Decide
+// 的 fail-safe 段把 tool_call 升人审——默认方向 fail-closed。
 //
 // # 裁决到放行/拒绝的映射
 //
@@ -41,7 +72,11 @@ import (
 //
 // 需要人工介入的情形一律不可重试：把「需要人」翻译成「多试几次」是退避语义
 // 最常见的误用，重试风暴会一直撞同一堵墙，且把真正的阻塞点埋在日志里。
-func Stage(g *Gate, op Op, onDecision func(Decision)) invoke.Stage {
+func Stage(g *Gate, op Op, onDecision func(Decision), opts ...StageOption) invoke.Stage {
+	var cfg stageConfig
+	for _, o := range opts {
+		o(&cfg)
+	}
 	name := "audit_gate"
 	return invoke.StageFunc{
 		StageName: name,
@@ -55,6 +90,11 @@ func Stage(g *Gate, op Op, onDecision func(Decision)) invoke.Stage {
 			effective := op
 			if c.Name != "" {
 				effective.Tool = c.Name
+				// 换工具名就重算变更标记（oagentkit/toolgate#85）：模板期
+				// 标记描述的是装配时的工具，与实际调用脱节时红线被绕过。
+				if cfg.classifyMutating != nil {
+					effective.Mutating = cfg.classifyMutating(c.Name)
+				}
 			}
 			d := g.Decide(ctx, effective)
 			if onDecision != nil {

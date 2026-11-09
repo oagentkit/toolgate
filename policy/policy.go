@@ -79,13 +79,25 @@ const (
 	DeciderSystem Decider = "system_policy" // 策略代批（审批单 decided_by 同值）
 )
 
+// Mutating 返回指向 b 的指针，供在 Op / Rule 字面量里内联填写变更标记：
+// `Op{..., Mutating: policy.Mutating(true)}`。变更标记是三态（见 Op.Mutating），
+// 裸 bool 的零值陷阱是本字段改成指针的原因（oagentkit/toolgate#85）。
+func Mutating(b bool) *bool { return &b }
+
 // Op 一次待裁决操作。
 type Op struct {
-	Type     OpType
-	Mode     Mode
-	Tool     string // 工具名（tool_call/execute_step）
-	Risk     int    // 1-4（plan_submit）；0=未评级
-	Mutating bool   // 工具名命中变异动词段（agentrun.IsMutatingTool）
+	Type OpType
+	Mode Mode
+	Tool string // 工具名（tool_call/execute_step）
+	Risk int    // 1-4（plan_submit）；0=未评级
+	// Mutating 变更类标记：工具名命中变异动词段（agentrun.IsMutatingTool）。
+	// **三态**（oagentkit/toolgate#85）：true=变更类（红线 deny）；false=调用方
+	// 显式声明非变更（正常裁决链）；nil=未标记——门自身无法从工具名判定变更性
+	// （动词表在调用方侧），nil 时的正确语义是「未知」而非「非变更」：
+	// fail-safe 升人审。此前是裸 bool，零值 false 让「漏填」恒等于「声明非变更」，
+	// 变更类工具的拒绝红线依赖调用方纪律——漏填即 auto_proceed 放行，
+	// 且审计谎报「白名单内只读采集工具」。构造用 Mutating(true/false) 内联。
+	Mutating *bool
 }
 
 // Decision 裁决结果（审计事件 payload 的语义源）。
@@ -129,7 +141,10 @@ func (r Rule) matches(op Op) bool {
 	if r.MaxRisk > 0 && op.Risk > r.MaxRisk {
 		return false
 	}
-	if r.Mutating != nil && *r.Mutating != op.Mutating {
+	// 变更标记过滤（oagentkit/toolgate#85）：规则指定了 mutating 而操作未标记
+	// （nil）时不命中——规则按「确实是变更类/确实是只读」裁量的前提不成立，
+	// 不得放行规则（该操作随后走 fail-safe 段升人审）。
+	if r.Mutating != nil && (op.Mutating == nil || *r.Mutating != *op.Mutating) {
 		return false
 	}
 	return true
@@ -155,8 +170,8 @@ func NewGate(p *Policy, a Arbiter) *Gate {
 	return &Gate{policy: p, arbiter: a}
 }
 
-// Decide 裁决：红线（独立于规则链前置硬判）→ 例外规则 → 矩阵层 → 兜底
-// need_human（未知形态 fail-safe）。
+// Decide 裁决：变更类红线（独立于规则链前置硬判，未标记 fail-safe 升人审）→
+// 例外规则 → 矩阵层 → 兜底 need_human（未知形态 fail-safe）。
 func (g *Gate) Decide(ctx context.Context, op Op) Decision {
 	// 红线前置、独立于规则裁决链（oagentkit/toolgate#71）：裁决序曾是「例外规则
 	// 首个命中即胜 → 矩阵层」，矩阵层的 mutating_tool_guard 只在零规则命中时可达——
@@ -165,9 +180,22 @@ func (g *Gate) Decide(ctx context.Context, op Op) Decision {
 	// 的硬不变量被击穿，审计还把越权放行记成规则裁决（Decider=rule、RuleID=规则 id）。
 	// 红线面前无例外：判定移出规则链，例外规则/仲裁插件无论产出什么都到不了这里；
 	// 审计 RuleID 如实标 mutating_tool_guard，不再谎报成规则裁量。
-	if op.Type == OpToolCall && op.Mutating {
-		return Decision{Verdict: VerdictDeny, Decider: DeciderRule, RuleID: "mutating_tool_guard",
-			Reason: "采集面工具命中变异动词段：变更必须走方案审批面，LLM 自主变异调用一律拒绝（任何模式；红线面前例外规则不可豁免，#71）"}
+	//
+	// 输入三态（oagentkit/toolgate#85）：红线唯一的输入是 Op.Mutating，而它是
+	// 调用方填写的标记——裸 bool 时代零值 false 让「漏填」恒等于「声明非变更」，
+	// 红线对构造路径的完整性毫无约束力（漏填/拼错字段/某条路径绕开 = 静默放行）。
+	// 指针三态把「未知」变成独立档位：nil fail-safe 升人审（与未知操作类型同一
+	// 口径），红线只在显式 true 时触发、放行只在显式 false 时发生——默认方向
+	// 从 fail-open 改成 fail-closed。
+	if op.Type == OpToolCall {
+		switch {
+		case op.Mutating == nil:
+			return Decision{Verdict: VerdictNeedHuman, Decider: DeciderRule, RuleID: "mutating_unclassified",
+				Reason: "变更标记未设置（Mutating=nil）：门无法从工具名判定变更性，不得默认按非变更放行，fail-safe 升人审（#85）"}
+		case *op.Mutating:
+			return Decision{Verdict: VerdictDeny, Decider: DeciderRule, RuleID: "mutating_tool_guard",
+				Reason: "采集面工具命中变异动词段：变更必须走方案审批面，LLM 自主变异调用一律拒绝（任何模式；红线面前例外规则不可豁免，#71）"}
+		}
 	}
 	for _, r := range g.policy.Rules {
 		if !r.matches(op) {
@@ -200,10 +228,16 @@ func (g *Gate) Decide(ctx context.Context, op Op) Decision {
 	}
 	switch op.Type {
 	case OpToolCall:
-		// 变异工具已在红线前置段拒绝（#71）：走到这里的只剩非变异（未评级/只读）
-		// 采集调用。留在此处的矩阵分支是只读白名单放行，别在此再加可被规则绕过的
-		// 变异判断——红线只有 Decide 开头一处，两处各判各的迟早漂移（#40 教训）。
-		return Decision{Verdict: VerdictAuto, Decider: DeciderRule, RuleID: "readonly_allowlist", Reason: "白名单内只读采集工具"}
+		// 变异工具已在红线前置段拒绝（#71）、未标记的已 fail-safe 升人审（#85）：
+		// 走到这里的只剩**显式声明**非变更的采集调用。此前 RuleID 写
+		// readonly_allowlist / 理由写「白名单内只读采集工具」——代码里并不存在
+		// 任何白名单结构，真实依据只是「调用方显式声明了非变更」，审计说谎
+		// （oagentkit/toolgate#85）：事后追责时审计者读到的是「白名单内」，
+		// 事实是「有人为这次调用背书了非变更」。留痕必须与真实依据相符。
+		// 别在此再加可被规则绕过的变异判断——红线只有 Decide 开头一处，
+		// 两处各判各的迟早漂移（#40 教训）。
+		return Decision{Verdict: VerdictAuto, Decider: DeciderRule, RuleID: "not_classified_as_mutating",
+			Reason: "调用方显式声明非变更类（未命中变异标记），按只读采集调用放行"}
 	case OpExecuteStep:
 		if op.Mode == ModePlan {
 			// plan 模式不可能存在已批准方案（plan_submit 恒 plan_only）——此模式

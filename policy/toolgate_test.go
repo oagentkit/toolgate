@@ -55,7 +55,7 @@ func TestWithAuditGateDeniesMutatingCall(t *testing.T) {
 	inner := &fakeTool{name: "shell_execute"}
 	var got Decision
 	wrapped := AuditGate(NewGate(nil, nil),
-		Op{Type: OpToolCall, Mode: ModeConfirm, Tool: "shell_execute", Mutating: true},
+		Op{Type: OpToolCall, Mode: ModeConfirm, Tool: "shell_execute", Mutating: Mutating(true)},
 		func(_ Op, dec Decision) { got = dec }, inner)
 	out, err := wrapped.InvokableRun(context.Background(), "{}")
 	assertRejectedObservation(t, out, err, "mutating_tool_guard")
@@ -71,7 +71,7 @@ func TestWithAuditGatePassesReadonlyCall(t *testing.T) {
 	inner := &fakeTool{name: "get_load"}
 	audits := 0
 	wrapped := AuditGate(NewGate(nil, nil),
-		Op{Type: OpToolCall, Mode: ModeAuto, Tool: "get_load"},
+		Op{Type: OpToolCall, Mode: ModeAuto, Tool: "get_load", Mutating: Mutating(false)},
 		func(_ Op, _ Decision) { audits++ }, inner)
 	if out, err := wrapped.InvokableRun(context.Background(), "{}"); err != nil || out != "ok" {
 		t.Fatalf("只读调用应透传: out=%q err=%v", out, err)
@@ -84,7 +84,7 @@ func TestWithAuditGatePassesReadonlyCall(t *testing.T) {
 func TestWithAuditGateNilGatePassthrough(t *testing.T) {
 	inner := &fakeTool{name: "shell_execute"}
 	wrapped := AuditGate(nil,
-		Op{Type: OpToolCall, Mode: ModeConfirm, Tool: "shell_execute", Mutating: true},
+		Op{Type: OpToolCall, Mode: ModeConfirm, Tool: "shell_execute", Mutating: Mutating(true)},
 		nil, inner)
 	if _, err := wrapped.InvokableRun(context.Background(), "{}"); err != nil {
 		t.Fatalf("未装配审计门应保持存量行为: %v", err)
@@ -108,15 +108,17 @@ func TestAuditGateFailClosed(t *testing.T) {
 		op   Op
 		id   string // 拒绝观察应能定位到的规则 id
 	}
-	// 规则面注入。Mutating 故意置 false：若规则注入失效，裁决会落回只读白名单
-	// 放行、本测当场红——置 true 则红线前置兜底 deny（#71），测的其实是红线不是
-	// 规则注入。
+	// 规则面注入。Mutating 必须显式置 false（#85 三态）：不标记（nil）会在
+	// fail-safe 段升人审、规则链根本不可达——那样测的就不是规则注入了；置
+	// true 则红线前置兜底 deny（#71），测的其实是红线不是规则注入。显式 false
+	// 让裁决走规则链：注入失效时落回矩阵段（not_classified_as_mutating 放行），
+	// 本测当场红。
 	mkRule := func(v Verdict) row {
 		id := "rule-" + string(v)
 		p := DefaultPolicy()
 		p.Rules = []Rule{{ID: id, Tools: []string{"restart_service"}, Verdict: v}}
 		return row{name: string(v) + " 规则", g: NewGate(p, nil),
-			op: Op{Type: OpToolCall, Mode: ModeConfirm, Tool: "restart_service"}, id: id}
+			op: Op{Type: OpToolCall, Mode: ModeConfirm, Tool: "restart_service", Mutating: Mutating(false)}, id: id}
 	}
 	for _, r := range []row{
 		mkRule(VerdictDeny),
@@ -137,7 +139,7 @@ func TestAuditGateFailClosed(t *testing.T) {
 	}
 	// auto 放行且真实执行（对照组：拒绝不是因为门坏了）。
 	inner := &fakeTool{name: "get_status"}
-	if _, err := AuditGate(NewGate(nil, nil), Op{Type: OpToolCall, Mode: ModeAuto, Tool: "get_load"}, nil, inner).InvokableRun(context.Background(), "{}"); err != nil {
+	if _, err := AuditGate(NewGate(nil, nil), Op{Type: OpToolCall, Mode: ModeAuto, Tool: "get_load", Mutating: Mutating(false)}, nil, inner).InvokableRun(context.Background(), "{}"); err != nil {
 		t.Fatalf("auto 应放行: %v", err)
 	}
 	if !inner.called {
@@ -190,8 +192,8 @@ func TestAuditFacesAgreeOnEveryProducibleVerdict(t *testing.T) {
 		g    *Gate
 		op   Op
 	}{
-		{"auto 白名单放行", NewGate(nil, nil), Op{Type: OpToolCall, Mode: ModeAuto, Tool: "read_logs"}},
-		{"deny 变异拒绝", NewGate(nil, nil), Op{Type: OpToolCall, Mode: ModeFull, Tool: "restart_service", Mutating: true}},
+		{"auto 白名单放行", NewGate(nil, nil), Op{Type: OpToolCall, Mode: ModeAuto, Tool: "read_logs", Mutating: Mutating(false)}},
+		{"deny 变异拒绝", NewGate(nil, nil), Op{Type: OpToolCall, Mode: ModeFull, Tool: "restart_service", Mutating: Mutating(true)}},
 		{"need_human 规则", ruleGate(VerdictNeedHuman), Op{Type: OpToolCall, Mode: ModeConfirm, Tool: "restart_service"}},
 		{"plan_only 规则（#54）", ruleGate(VerdictPlanOnly), Op{Type: OpToolCall, Mode: ModeConfirm, Tool: "restart_service"}},
 		{"plan_only 矩阵", NewGate(nil, nil), Op{Type: OpPlanSubmit, Mode: ModePlan, Risk: 2, Tool: "restart_all"}},
