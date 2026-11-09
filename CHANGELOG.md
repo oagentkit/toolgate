@@ -2,6 +2,68 @@
 
 > 本文件由 `matrix-tools/scripts/gen_changelogs.py` 从 git 历史生成，按 tag 切段、取每段内的 conventional commit 渲染。
 
+## [v0.16.1] — 2026-11-10
+
+### 修复(policy)：变更类红线改三态 Mutating——未标记 fail-safe 升人审，放行留痕不再谎报白名单（#85）
+
+变更类工具的拒绝红线唯一输入是 Op.Mutating，而它是调用方填写的裸 bool：
+零值 false 恒等于「声明非变更」——漏填一个字段，delete_repository 就从
+deny（红线）变成 auto_proceed（放行），且审计留痕谎报「白名单内只读采集
+工具」（代码里并不存在任何白名单结构，真实依据只是「没人说它是变更类」）。
+门自身无法从工具名判定变更性（动词表在调用方侧），裸 bool 下红线的正确性
+对构造路径的完整性毫无约束力。
+- Op.Mutating 改 *bool 三态（构造用新增的 Mutating(b) 内联辅助）：
+  true=红线 deny（#71 语义不变）；false=显式声明非变更，走正常裁决链；
+  nil=未标记 ⇒ fail-safe 升人审（RuleID=mutating_unclassified）——默认
+  方向从 fail-open 改成 fail-closed，与未知操作类型的既有口径一致。
+- 放行分支留痕如实：RuleID readonly_allowlist/「白名单内只读采集工具」
+  改为 not_classified_as_mutating/「调用方显式声明非变更类……」，审计与
+  真实判定依据相符。
+- Rule.matches：规则指定 mutating 而操作未标记（nil）时不命中——裁量
+  前提不成立，该操作随后走 fail-safe 段。
+- Stage（invoke 链适配器）：换工具名重算变更标记。模板 Mutating 描述的
+  是装配期的工具，链上实际调用可不同——此前覆盖 Tool 不重算，标记与实际
+  工具脱节，红线被绕过。新增 StageOption/WithMutatingClassifier（宿主侧
+  通常传 agentrun.IsMutatingTool）；未接分类器且模板未标记时同样 fail-safe
+  升人审。Stage 签名以 variadic 追加选项，既有调用点不受影响。
+回归测试（mutating_redline_test.go，修复前红在 auto_proceed+readonly_allowlist）：
+漏填不落 auto_proceed / 三态全谱 / 宽松规则面前未标记不放行 / Stage 分类器
+按实际工具重算（双向：模板 false 遇变异工具拒绝、模板 true 经分类器判非
+变更放行）/ 未接分类器的未标记模板 fail-safe。既有矩阵、红线（#71）、
+fail-closed、仲裁路径用例同步适配三态语义后保持绿。
+Closes oagentkit/toolgate#85
+
+- 杂务(deps)：依赖地板追到最新——github.com/oekit/pkg v0.41.1
+
+| 依赖 | 现地板 | 抬到 |
+|---|---|---|
+| `github.com/oekit/pkg` | `v0.41.0` | `v0.41.1` |
+## 为什么
+矩阵的**发版时刻地板时效**门禁（`verify_tag_floor --ref HEAD`）要求：各仓 HEAD
+（= 下次发版会发出去的内容）的依赖地板，相对那一刻的依赖最新版本，不能已落后。
+oekit 基座与矩阵模块都在高频发版 ⇒ 地板是**跑步机**，落后一格就会判红。
+## 兼容性实测
+本工具在提交前跑完 `go build` / `go vet` / `go test -race -count=1 ./...`（全绿才提交）
+与 `go mod tidy -diff`（无漂移）⇒ 改动**只影响依赖版本**，零行为差异。
+只改 `go.mod` / `go.sum` ⇒ 不需要 CHANGELOG 条目（版本段由下次发版的 `prewrite` 生成）。
+
+- 杂务(deps)：依赖地板追到最新——github.com/oagentkit/mcpkit v0.12.6
+
+| 依赖 | 现地板 | 抬到 |
+|---|---|---|
+| `github.com/oagentkit/mcpkit` | `v0.12.5` | `v0.12.6` |
+| `github.com/oekit/concurrency` | `v0.31.0` | `v0.31.1` |
+| `github.com/oekit/pkg` | `v0.40.0` | `v0.41.0` |
+## 为什么
+矩阵的**发版时刻地板时效**门禁（`verify_tag_floor --ref HEAD`）要求：各仓 HEAD
+（= 下次发版会发出去的内容）的依赖地板，相对那一刻的依赖最新版本，不能已落后。
+oekit 基座与矩阵模块都在高频发版 ⇒ 地板是**跑步机**，落后一格就会判红。
+## 兼容性实测
+本工具在提交前跑完 `go build` / `go vet` / `go test -race -count=1 ./...`（全绿才提交）
+与 `go mod tidy -diff`（无漂移）⇒ 改动**只影响依赖版本**，零行为差异。
+只改 `go.mod` / `go.sum` ⇒ 不需要 CHANGELOG 条目（版本段由下次发版的 `prewrite` 生成）。
+
+
 ## [v0.16.0] — 2026-11-09
 
 ### 修复：toolgate 第三轮 issue 清零（#71 #72 #73）
