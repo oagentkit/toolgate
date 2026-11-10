@@ -2,6 +2,52 @@
 
 > 本文件由 `matrix-tools/scripts/gen_changelogs.py` 从 git 历史生成，按 tag 切段、取每段内的 conventional commit 渲染。
 
+## [v0.17.1] — 2026-11-11
+
+### 修复(policy)：三单清零——换名不信任模板标记、未评级不代批（#98 #99 #100）
+
+- #98/#100 Stage 换工具名且未配分类器时不再信任模板期显式 Mutating(false)
+  （#85 的残留旁路：模板 false + 无分类器原样留用，delete_repository 经
+  同一 stage 被红线放行且审计谎报「显式声明非变更」）：置 nil 走 Decide
+  fail-safe（mutating_unclassified 升人审）。收窄边界：模板未声明 Tool
+  （全量声明）与同名调用不受影响——既有测试钉住的合法装配形态保持
+- #99 规则面对 plan_submit 的代批类规则（VerdictAuto）排除 Risk=0——
+  「未评级不代批」的 fail-closed 不变量与矩阵面（>=1）一个口径；裁决序
+  规则先于矩阵，此前宽松 max_risk 规则对未评级方案照常代批。tool_call 面
+  Risk 恒 0（字段语义面是 plan_submit），不受本条约束
+测试按 issue 号命名新增 2 条回归用例；全仓 go test ./... 全绿。
+
+- 杂务(deps)：依赖地板追到最新——github.com/oekit/concurrency v0.33.0
+
+| 依赖 | 现地板 | 抬到 |
+|---|---|---|
+| `github.com/oekit/concurrency` | `v0.32.0` | `v0.33.0` |
+| `github.com/oekit/pkg` | `v0.42.0` | `v0.43.0` |
+## 为什么
+矩阵的**发版时刻地板时效**门禁（`verify_tag_floor --ref HEAD`）要求：各仓 HEAD
+（= 下次发版会发出去的内容）的依赖地板，相对那一刻的依赖最新版本，不能已落后。
+oekit 基座与矩阵模块都在高频发版 ⇒ 地板是**跑步机**，落后一格就会判红。
+## 兼容性实测
+本工具在提交前跑完 `go build` / `go vet` / `go test -race -count=1 ./...`（全绿才提交）
+与 `go mod tidy -diff`（无漂移）⇒ 改动**只影响依赖版本**，零行为差异。
+只改 `go.mod` / `go.sum` ⇒ 不需要 CHANGELOG 条目（版本段由下次发版的 `prewrite` 生成）。
+
+- 杂务(deps)：依赖地板追到最新——github.com/oekit/concurrency v0.32.0
+
+| 依赖 | 现地板 | 抬到 |
+|---|---|---|
+| `github.com/oekit/concurrency` | `v0.31.2` | `v0.32.0` |
+| `github.com/oekit/pkg` | `v0.41.1` | `v0.42.0` |
+## 为什么
+矩阵的**发版时刻地板时效**门禁（`verify_tag_floor --ref HEAD`）要求：各仓 HEAD
+（= 下次发版会发出去的内容）的依赖地板，相对那一刻的依赖最新版本，不能已落后。
+oekit 基座与矩阵模块都在高频发版 ⇒ 地板是**跑步机**，落后一格就会判红。
+## 兼容性实测
+本工具在提交前跑完 `go build` / `go vet` / `go test -race -count=1 ./...`（全绿才提交）
+与 `go mod tidy -diff`（无漂移）⇒ 改动**只影响依赖版本**，零行为差异。
+只改 `go.mod` / `go.sum` ⇒ 不需要 CHANGELOG 条目（版本段由下次发版的 `prewrite` 生成）。
+
+
 ## [v0.17.0] — 2026-11-10
 
 - 杂务(deps)：依赖地板追到最新——mcpkit v0.12.8 / concurrency v0.31.2
