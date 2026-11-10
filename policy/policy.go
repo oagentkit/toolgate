@@ -141,6 +141,16 @@ func (r Rule) matches(op Op) bool {
 	if r.MaxRisk > 0 && op.Risk > r.MaxRisk {
 		return false
 	}
+	// 未评级（Risk=0）的方案不得被代批类规则命中（oagentkit/toolgate#99）：
+	// Risk 字段语义面是 plan_submit（1-4；0=未评级），Risk=0 落进 max_risk
+	// 规则的 [0,MaxRisk] 区间时，「未评级不代批」的 fail-closed 不变量被
+	// 规则面静默击穿（裁决序规则先于矩阵，矩阵面 `op.Risk >= 1` 的同口径
+	// 防线到不了）。代批=系统为风险背书，风险未知的方案不得代批——与矩阵面
+	// >= 1 同一不变量，两面一个口径。tool_call 面的 Risk 恒 0（不适用），
+	// 不在本条约束内。
+	if op.Type == OpPlanSubmit && r.Verdict == VerdictAuto && op.Risk == 0 {
+		return false
+	}
 	// 变更标记过滤（oagentkit/toolgate#85）：规则指定了 mutating 而操作未标记
 	// （nil）时不命中——规则按「确实是变更类/确实是只读」裁量的前提不成立，
 	// 不得放行规则（该操作随后走 fail-safe 段升人审）。
