@@ -4,6 +4,13 @@
 
 ## [v0.17.0] — 2026-11-10
 
+- 杂务(deps)：依赖地板追到最新——mcpkit v0.12.8 / concurrency v0.31.2
+
+## 为什么
+发版时刻地板时效门禁（release.py tag）：v0.17.0 打 tag 这一刻的两处地板落后。
+## 兼容性实测
+go build / go vet / go test -race 全绿 ⇒ 只影响依赖版本，零行为差异。
+
 - 杂务(invoke)!：退役 invoke 兼容壳——兼容期截止 v0.16.0 已过（#93）
 
 删除 invoke/（Deprecated 转发壳，alias.go + compat_test.go + doc.go，
