@@ -17,6 +17,7 @@
   Risk 恒 0（字段语义面是 plan_submit），不受本条约束
 测试按 issue 号命名新增 2 条回归用例；全仓 go test ./... 全绿。
 
+- 杂务(deps)：依赖地板追到最新——guardx v0.24.2 / textx v0.10.8 / runtime v0.12.7（2026-11-11 列车）
 - 杂务(deps)：依赖地板追到最新——github.com/oekit/concurrency v0.33.0
 
 | 依赖 | 现地板 | 抬到 |
