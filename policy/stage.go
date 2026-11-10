@@ -94,6 +94,16 @@ func Stage(g *Gate, op Op, onDecision func(Decision), opts ...StageOption) invok
 				// 标记描述的是装配时的工具，与实际调用脱节时红线被绕过。
 				if cfg.classifyMutating != nil {
 					effective.Mutating = cfg.classifyMutating(c.Name)
+				} else if op.Mutating != nil && op.Tool != "" && c.Name != op.Tool {
+					// 无分类器且换名（模板确实声明了工具名）：不信任模板期标记
+					// （oagentkit/toolgate#98/#100——#85 的残留旁路：模板显式
+					// false + 未配分类器时标记原样留用，delete_repository 经
+					// 同一 stage 被红线放行且审计谎报「显式声明非变更」）。置
+					// nil 走 Decide 的 fail-safe（mutating_unclassified 升人审），
+					// 与「模板 nil」半边同口径——fail-closed。同名调用与模板
+					// 未声明 Tool（Tool=="" 的全量声明，既有测试钉住的合法装配
+					// 形态）不在此列，模板标记原样生效。
+					effective.Mutating = nil
 				}
 			}
 			d := g.Decide(ctx, effective)
