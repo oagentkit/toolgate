@@ -2,6 +2,22 @@
 
 > 本文件由 `matrix-tools/scripts/gen_changelogs.py` 从 git 历史生成，按 tag 切段、取每段内的 conventional commit 渲染。
 
+## [v0.17.0] — 2026-11-10
+
+- 杂务(invoke)!：退役 invoke 兼容壳——兼容期截止 v0.16.0 已过（#93）
+
+删除 invoke/（Deprecated 转发壳，alias.go + compat_test.go + doc.go，
+共 3 文件 / 144 行）。壳随 v0.15.0 提供、兼容期截止 v0.16.0；
+v0.16.1 已越过截止版本发版，按 migration.md 的搬迁纪律到期即删。
+ BREAKING CHANGE: github.com/oagentkit/toolgate/invoke 自本版起不再存在，
+ 按旧路径 import 的下游将编译失败。迁移路径：改 import
+ github.com/oagentkit/guardx/invoke（guardx 本就是矩阵内依赖，类型为
+ 别名同型、哨兵错误与函数同实体，逐符号替换 import 行即可，无语义变化）。
+ 兼容期与删除版本已登记 matrix-tools modules.json compatShells 段
+ （until v0.16.0 / removedIn v0.17.0）。
+Closes #93
+
+
 ## [v0.16.1] — 2026-11-10
 
 ### 修复(policy)：变更类红线改三态 Mutating——未标记 fail-safe 升人审，放行留痕不再谎报白名单（#85）
@@ -812,19 +828,6 @@ oekit v0.18.0 的两个发布都是**纯增量**，无破坏性变更：
 - 警告：无参重生成会吞掉待发版段，--next-version 是唯一能产出待发版段的开关
 - 本仓相关提醒（见正文）
 
-- 文档(changelog)：按新生成器规则重生成 CHANGELOG.md
-
-生成器修复（oagentkit/matrix-tools#43）落地：
-① `[round-N] ` 前缀被剥离 → conventional commit 解析不再失效，
-   **commit body 保留**（此前整段被丢弃，发布说明只剩标题）；
-② 非 conventional 提交也保留 body；
-③ `--check` 识别「待发版段」（预写了但还没打 tag 的那段）。
-本 PR 恢复的是**本就在 commit body 里**的正文（迁移步骤、代码块、
-判据锚点）——此前被 `[round-N] ` 前缀导致的解析失败丢弃了。
-**没有任何发布说明内容被删除**：删除的行都能在新增行里找到对应
-（规范化掉 `(#N)` 与 `[round-N] ` 前缀后逐行比对）。
-关联：oagentkit/matrix-tools#43、oagentkit/matrix-tools#40
-
 
 ## [v0.12.0] — 2026-10-19
 
@@ -1217,19 +1220,6 @@ toolgate/policy/stage.go:6:	"github.com/oagentkit/guardx/invoke"
 - tag 必须落在 CHANGELOG 提交之后（下游 go get 拿到的是 tag 快照）
 - 警告：无参重生成会吞掉待发版段，--next-version 是唯一能产出待发版段的开关
 - 本仓相关提醒（见正文）
-
-- 文档(changelog)：按新生成器规则重生成 CHANGELOG.md
-
-生成器修复（oagentkit/matrix-tools#43）落地：
-① `[round-N] ` 前缀被剥离 → conventional commit 解析不再失效，
-   **commit body 保留**（此前整段被丢弃，发布说明只剩标题）；
-② 非 conventional 提交也保留 body；
-③ `--check` 识别「待发版段」（预写了但还没打 tag 的那段）。
-本 PR 恢复的是**本就在 commit body 里**的正文（迁移步骤、代码块、
-判据锚点）——此前被 `[round-N] ` 前缀导致的解析失败丢弃了。
-**没有任何发布说明内容被删除**：删除的行都能在新增行里找到对应
-（规范化掉 `(#N)` 与 `[round-N] ` 前缀后逐行比对）。
-关联：oagentkit/matrix-tools#43、oagentkit/matrix-tools#40
 
 
 ## [v0.9.0] — 2026-10-19
