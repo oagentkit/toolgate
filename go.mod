@@ -11,7 +11,10 @@ require (
 	gopkg.in/yaml.v3 v3.0.1
 )
 
-require github.com/oekit/pkg v0.43.0 // indirect
+require (
+	github.com/mattn/go-isatty v0.0.20 // indirect
+	github.com/oekit/pkg v0.43.0 // indirect
+)
 
 require (
 	github.com/bahlo/generic-list-go v0.2.0 // indirect
@@ -32,8 +35,8 @@ require (
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
 	github.com/modern-go/reflect2 v1.0.2 // indirect
 	github.com/nikolalohinski/gonja v1.5.3 // indirect
-	github.com/oagentkit/guardx v0.24.1
-	github.com/oagentkit/runtime v0.12.6 // indirect
+	github.com/oagentkit/guardx v0.24.2
+	github.com/oagentkit/runtime v0.12.7 // indirect
 	github.com/pelletier/go-toml/v2 v2.0.9 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.2 // indirect
