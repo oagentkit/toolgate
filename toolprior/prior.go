@@ -12,9 +12,10 @@
 package toolprior
 
 import (
+	"cmp"
 	"context"
 	"fmt"
-	"sort"
+	"slices"
 	"strings"
 	"sync/atomic"
 
@@ -89,14 +90,17 @@ func (t *Table) sortedEntries(ctx context.Context) []resolvedEntry {
 		}
 		rs[i] = resolvedEntry{e: e, idx: i, name: name, missing: name == ""}
 	}
-	sort.SliceStable(rs, func(a, b int) bool {
-		if rs[a].e.Priority != rs[b].e.Priority {
-			return rs[a].e.Priority < rs[b].e.Priority
+	slices.SortStableFunc(rs, func(a, b resolvedEntry) int {
+		if c := cmp.Compare(a.e.Priority, b.e.Priority); c != 0 {
+			return c
 		}
-		if rs[a].missing != rs[b].missing {
-			return rs[b].missing // Info 失败的排末尾，不遮挡可用工具
+		if a.missing != b.missing {
+			if a.missing {
+				return 1 // Info 失败的排末尾，不遮挡可用工具
+			}
+			return -1
 		}
-		return rs[a].idx < rs[b].idx
+		return cmp.Compare(a.idx, b.idx)
 	})
 	return rs
 }
