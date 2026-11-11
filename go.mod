@@ -11,7 +11,7 @@ require (
 	gopkg.in/yaml.v3 v3.0.1
 )
 
-require github.com/oekit/pkg v0.45.0 // indirect
+require github.com/oekit/pkg v0.46.0 // indirect
 
 require (
 	github.com/bahlo/generic-list-go v0.2.0 // indirect
