@@ -275,7 +275,8 @@ type Result struct {
 }
 
 // Execute 按依赖就绪执行（引擎见 runner）。结果按输入序返回。
-// 前序失败不阻断后续；ctx 取消或 StopAfter 成功后，未启动任务记 Skipped。
+// 前序失败不阻断后续；ctx 取消或 StopAfter 成功后，未启动任务记 Skipped——
+// 「未启动」含等并发名额期间被 ctx 取消者（从未执行只有一种归类，toolgate#121）。
 func (s *Scheduler) Execute(ctx context.Context, tasks []Task) []Result {
 	calls := make([]Call, len(tasks))
 	for i, t := range tasks {
@@ -421,6 +422,14 @@ func (r *runner) runOne(i int) {
 	if r.items[i].CanRunParallel {
 		release, err := r.sem.Acquire(r.ctx)
 		if err != nil {
+			// 等名额期间被 ctx 取消 = 从未执行 → 与上方「未启动」路径同口径记
+			// Skipped（toolgate#121）：Result.Skipped 字段注释与 Execute godoc 的
+			// 契约都是「因 ctx 取消未执行」；记 Err 会让宿主把一次主动取消当失败、
+			// 触发必然再次被取消的退避重试风暴。非 ctx 类错误（理论防御）仍记 Err。
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				r.record(i, Result{ID: t.ID, Name: t.Name, Skipped: true})
+				return
+			}
 			r.record(i, Result{ID: t.ID, Name: t.Name, Err: err})
 			return
 		}

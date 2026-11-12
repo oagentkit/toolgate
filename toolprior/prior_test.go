@@ -3,7 +3,9 @@ package toolprior
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/cloudwego/eino/components/tool"
@@ -192,4 +194,98 @@ func TestStrategyPromptInfoErrorFallback(t *testing.T) {
 	if !strings.Contains(prompt, "tool#0") {
 		t.Fatalf("Info 失败应有回退名: %s", prompt)
 	}
+}
+
+// flakyTool 首次 Info 失败、之后成功——模拟 MCP tools/list 瞬时失败（toolgate#122）。
+type flakyTool struct {
+	*fakeTool
+	calls atomic.Int32
+}
+
+func (f *flakyTool) Info(ctx context.Context) (*schema.ToolInfo, error) {
+	if f.calls.Add(1) == 1 {
+		return nil, errors.New("tools/list 瞬时失败")
+	}
+	return f.fakeTool.Info(ctx)
+}
+
+// promptToolLines 提示词逐行显示名（"- <名>（…）"）。
+func promptToolLines(prompt string) []string {
+	var out []string
+	for _, line := range strings.Split(prompt, "\n") {
+		rest, ok := strings.CutPrefix(line, "- ")
+		if !ok {
+			continue
+		}
+		name, _, _ := strings.Cut(rest, "（")
+		out = append(out, name)
+	}
+	return out
+}
+
+// TestOrderedAndStrategyPromptShareOneSnapshot（toolgate#122）：「共用同一视图」
+// 必须是同一份首读快照——首读 Info 瞬时失败不得在次读翻转（各算一次 ⇒ 提示词
+// 声明顺序与真实工具表顺序分裂，正是 sortedEntries godoc 声明要避免的事）。
+// 两个读取顺序各钉一遍（Ordered 先 / StrategyPrompt 先）。
+func TestOrderedAndStrategyPromptShareOneSnapshot(t *testing.T) {
+	ctx := context.Background()
+	// flaky 注册在中间——失败即排末尾才看得出顺序差（排本就末尾是空操作）。
+	build := func() (*Table, *flakyTool) {
+		flaky := &flakyTool{fakeTool: &fakeTool{name: "flaky"}}
+		tb := NewTable().
+			Add(Entry{Tool: &fakeTool{name: "alpha"}, Priority: PriorityCore}).
+			Add(Entry{Tool: flaky, Priority: PriorityCore}).
+			Add(Entry{Tool: &fakeTool{name: "beta"}, Priority: PriorityCore})
+		return tb, flaky
+	}
+	// Ordered 逐条显示名（flaky 按指针识别，免 Info 计数被测试自身打乱）。
+	orderedNames := func(tb *Table, flaky *flakyTool) []string {
+		var out []string
+		for _, bt := range tb.Ordered(ctx) {
+			if any(bt) == any(flaky) {
+				out = append(out, "flaky")
+				continue
+			}
+			info, _ := bt.Info(ctx)
+			out = append(out, info.Name)
+		}
+		return out
+	}
+
+	t.Run("Ordered先读", func(t *testing.T) {
+		tb, flaky := build()
+		ordered := orderedNames(tb, flaky) // 首读：flaky Info 第 1 次失败 → 排本档末尾
+		if !slices.Equal(ordered, []string{"alpha", "beta", "flaky"}) {
+			t.Fatalf("首读 Ordered 序: %v", ordered)
+		}
+		if got := flaky.calls.Load(); got != 1 {
+			t.Fatalf("首读应恰解析 Info 一次: %d", got)
+		}
+		prompt := tb.StrategyPrompt(ctx) // 次读：同视图，不得重放 Info
+		if got := flaky.calls.Load(); got != 1 {
+			t.Fatalf("次读不应重放 Info（非快照）: %d", got)
+		}
+		if lines := promptToolLines(prompt); !slices.Equal(lines, []string{"alpha", "beta", "tool#1"}) {
+			t.Fatalf("提示词与 Ordered 视图分裂（瞬时失败在两入口间翻转）: 提示词=%v Ordered=%v", lines, ordered)
+		}
+	})
+
+	t.Run("StrategyPrompt先读", func(t *testing.T) {
+		tb, flaky := build()
+		prompt := tb.StrategyPrompt(ctx) // 首读：flaky Info 第 1 次失败 → 缺名回退 tool#1、排末尾
+		lines := promptToolLines(prompt)
+		if !slices.Equal(lines, []string{"alpha", "beta", "tool#1"}) {
+			t.Fatalf("首读提示词行序: %v", lines)
+		}
+		if got := flaky.calls.Load(); got != 1 {
+			t.Fatalf("首读应恰解析 Info 一次: %d", got)
+		}
+		ordered := orderedNames(tb, flaky) // 次读：必须仍是同一份视图
+		if !slices.Equal(ordered, []string{"alpha", "beta", "flaky"}) {
+			t.Fatalf("Ordered 与提示词视图分裂: Ordered=%v 提示词=%v", ordered, lines)
+		}
+		if got := flaky.calls.Load(); got != 1 {
+			t.Fatalf("次读不应重放 Info（非快照）: %d", got)
+		}
+	})
 }
