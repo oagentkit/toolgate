@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"sync"
 	"sync/atomic"
 
 	"encoding/json"
@@ -49,21 +50,31 @@ type Entry struct {
 }
 
 // Table 工具优先级表。构建期写入（Add）、构建后只读（Ordered/StrategyPrompt）——
-// 非并发安全，调用方需保证"先构建后共享"。
+// 写侧非并发安全，调用方需保证"先构建后共享"；首读解析 Info 并冻结排序快照，
+// 此后两入口（含并发读）共享同一份视图。
 type Table struct {
 	entries []Entry
+	// sortedOnce/sorted 一次性排序快照：首次 Ordered/StrategyPrompt 解析 Info
+	// 并缓存，两入口此后同源（toolgate#122：此前「共用同一视图」实为各算一次，
+	// 两次解析之间 Info（MCP tools/list）瞬时失败翻转 ⇒ 提示词声明顺序与真实
+	// 工具表分裂）。sync.Once 兼作读侧初始化的并发安全（先构建后共享的读契约）。
+	sortedOnce sync.Once
+	sorted     []resolvedEntry
 }
 
 // NewTable 创建空表。
 func NewTable() *Table { return &Table{} }
 
 // Add 注册一条（链式）。Tool 为 nil 时 panic——注册期配置错误应尽早暴露，
-// 运行期才炸的 nil Tool 难排查。
+// 运行期才炸的 nil Tool 难排查。首读即冻结快照，故须按"构建期写入"契约在
+// 首次 Ordered/StrategyPrompt 之前完成全部 Add（重置快照，防御违约态旧视图）。
 func (t *Table) Add(e Entry) *Table {
 	if e.Tool == nil {
 		panic("toolprior: Entry.Tool 不能为 nil")
 	}
 	t.entries = append(t.entries, e)
+	t.sortedOnce = sync.Once{} // 零值重置（未并发使用的构建期写入面）
+	t.sorted = nil
 	return t
 }
 
@@ -78,35 +89,41 @@ type resolvedEntry struct {
 	missing bool   // Info 失败/无名：排末尾，不遮挡可用工具
 }
 
-// sortedEntries 统一排序视图（Ordered 与 StrategyPrompt 共用）：priority 升序 →
-// Info 失败的排末尾 → 同档保持注册序。两处共用同一视图，提示词宣称的顺序
-// 与真实工具表顺序才不会在工具元数据缺失时互相矛盾。
+// sortedEntries 统一排序视图（Ordered 与 StrategyPrompt 真共用同一份）：
+// priority 升序 → Info 失败的排末尾 → 同档保持注册序。
+// 首次调用解析 Info 并冻结快照（构建后只读契约的自然延伸），此后重读不再重放
+// Info——两入口读同一份，提示词宣称的顺序与真实工具表顺序才不会在工具元数据
+// 瞬时缺失时互相矛盾（toolgate#122：各算一次时两次解析间成败翻转即分裂）。
 func (t *Table) sortedEntries(ctx context.Context) []resolvedEntry {
-	rs := make([]resolvedEntry, len(t.entries))
-	for i, e := range t.entries {
-		name := ""
-		if info, err := e.Tool.Info(ctx); err == nil && info.Name != "" {
-			name = info.Name
-		}
-		rs[i] = resolvedEntry{e: e, idx: i, name: name, missing: name == ""}
-	}
-	slices.SortStableFunc(rs, func(a, b resolvedEntry) int {
-		if c := cmp.Compare(a.e.Priority, b.e.Priority); c != 0 {
-			return c
-		}
-		if a.missing != b.missing {
-			if a.missing {
-				return 1 // Info 失败的排末尾，不遮挡可用工具
+	t.sortedOnce.Do(func() {
+		rs := make([]resolvedEntry, len(t.entries))
+		for i, e := range t.entries {
+			name := ""
+			if info, err := e.Tool.Info(ctx); err == nil && info.Name != "" {
+				name = info.Name
 			}
-			return -1
+			rs[i] = resolvedEntry{e: e, idx: i, name: name, missing: name == ""}
 		}
-		return cmp.Compare(a.idx, b.idx)
+		slices.SortStableFunc(rs, func(a, b resolvedEntry) int {
+			if c := cmp.Compare(a.e.Priority, b.e.Priority); c != 0 {
+				return c
+			}
+			if a.missing != b.missing {
+				if a.missing {
+					return 1 // Info 失败的排末尾，不遮挡可用工具
+				}
+				return -1
+			}
+			return cmp.Compare(a.idx, b.idx)
+		})
+		t.sorted = rs
 	})
-	return rs
+	return t.sorted
 }
 
 // Ordered 按优先级稳定排序返回工具表（同优先级保持注册序）。
-// Info 失败的条目在本优先级档内排后（跨档仍按优先级——StrategyPrompt 与 Ordered 共用同一视图）（排序键不可得时不遮挡可用工具）。
+// Info 失败的条目在本优先级档内排后（跨档仍按优先级——与 StrategyPrompt 共用
+// 首读冻结的同一份视图，toolgate#122）（排序键不可得时不遮挡可用工具）。
 func (t *Table) Ordered(ctx context.Context) []tool.BaseTool {
 	rs := t.sortedEntries(ctx)
 	out := make([]tool.BaseTool, 0, len(rs))
@@ -116,7 +133,8 @@ func (t *Table) Ordered(ctx context.Context) []tool.BaseTool {
 	return out
 }
 
-// StrategyPrompt 渲染"工具使用策略"提示词段（按优先级序，与 Ordered 同一视图）。
+// StrategyPrompt 渲染"工具使用策略"提示词段（按优先级序，与 Ordered 共用首读
+// 冻结的同一份视图——提示词声明顺序即真实工具表顺序，toolgate#122）。
 // 空表返回空串。调用方拼进 agent instruction。
 func (t *Table) StrategyPrompt(ctx context.Context) string {
 	if len(t.entries) == 0 {

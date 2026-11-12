@@ -369,3 +369,53 @@ func TestExecutePanicTaskIsolated(t *testing.T) {
 		t.Fatalf("其余任务不受影响: %+v", res[1])
 	}
 }
+
+// TestExecuteCtxCancelWhileWaitingOnSlotSkips（toolgate#121）：等并发名额期间被
+// ctx 取消的任务从未执行——与「未启动」路径同口径记 Skipped 而非 Err（按 Err 读
+// 会把主动取消当失败、触发必然再次被取消的退避重试；按 Skipped 读才会漏掉它）。
+func TestExecuteCtxCancelWhileWaitingOnSlotSkips(t *testing.T) {
+	s := &Scheduler{MaxConcurrency: 1}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	var executedB atomic.Bool
+	started := make(chan struct{})
+	hold := Task{Call: Call{ID: "A", Name: "hold", Hints: Hints{Idempotent: b(true)}},
+		Run: func(ctx context.Context) (string, error) {
+			close(started)
+			<-ctx.Done() // 占住唯一并发名额直到取消
+			return "", ctx.Err()
+		}}
+	queue := Task{Call: Call{ID: "B", Name: "queue", Hints: Hints{Idempotent: b(true)}},
+		Run: func(ctx context.Context) (string, error) {
+			executedB.Store(true)
+			return "b", nil
+		}}
+
+	var wg sync.WaitGroup
+	var res []Result
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		res = s.Execute(ctx, []Task{hold, queue})
+	}()
+
+	<-started // A 已占住名额，B 在 sem.Acquire 上排队（已过未启动判定）
+	time.Sleep(100 * time.Millisecond)
+	cancel()
+	wg.Wait()
+
+	if len(res) != 2 || res[0].ID == "" || res[1].ID == "" {
+		t.Fatalf("结果应全部落账: %+v", res)
+	}
+	// A 实际执行过（执行体被取消返回 ctx.Err）→ 记 Err 合理。
+	if !errors.Is(res[0].Err, context.Canceled) || res[0].Skipped {
+		t.Fatalf("已执行任务被取消应记 Err: %+v", res[0])
+	}
+	// B 从未执行 ⇒ 必须 Skipped、Err 为空（唯一归类）。
+	if !executedB.Load() {
+		if !res[1].Skipped || res[1].Err != nil || res[1].Output != "" {
+			t.Fatalf("等名额被取消且未执行的任务应记 Skipped 而非 Err: %+v", res[1])
+		}
+	}
+}
