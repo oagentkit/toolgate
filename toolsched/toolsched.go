@@ -440,6 +440,19 @@ func (r *runner) runOne(i int) {
 		defer r.gate.Unlock()
 	}
 
+	// gate 等待期取消/停轮复检（toolgate#124，#121 的 gate 路径残留）：
+	// 最前的 skip 判定与执行之间隔着 gate 这道**不可取消的 sync 锁**——长任务
+	// 持 gate 期间宿主 cancel/StopAfter 停轮落地，拿到锁后不复检就会在已取消/
+	// 已停轮的调度里照跑，与 sem 等待期取消=Skipped（#121 明文契约）口径分裂。
+	// defer 已在拿锁时注册，此处提前 return 会正确释放 gate（与 sem release）。
+	r.mu.Lock()
+	skip = r.stopped || r.ctx.Err() != nil
+	r.mu.Unlock()
+	if skip {
+		r.record(i, Result{ID: t.ID, Name: t.Name, Skipped: true})
+		return
+	}
+
 	out, err := runGuarded(r.ctx, t)
 	r.record(i, Result{ID: t.ID, Name: t.Name, Output: out, Err: err})
 	if t.StopAfter && err == nil {

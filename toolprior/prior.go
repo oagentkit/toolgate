@@ -50,16 +50,27 @@ type Entry struct {
 }
 
 // Table 工具优先级表。构建期写入（Add）、构建后只读（Ordered/StrategyPrompt）——
-// 写侧非并发安全，调用方需保证"先构建后共享"；首读解析 Info 并冻结排序快照，
+// 写侧非并发安全，调用方需保证"先构建后共享"；首读解析 Info 并缓存排序快照，
 // 此后两入口（含并发读）共享同一份视图。
 type Table struct {
 	entries []Entry
-	// sortedOnce/sorted 一次性排序快照：首次 Ordered/StrategyPrompt 解析 Info
-	// 并缓存，两入口此后同源（toolgate#122：此前「共用同一视图」实为各算一次，
-	// 两次解析之间 Info（MCP tools/list）瞬时失败翻转 ⇒ 提示词声明顺序与真实
-	// 工具表分裂）。sync.Once 兼作读侧初始化的并发安全（先构建后共享的读契约）。
-	sortedOnce sync.Once
-	sorted     []resolvedEntry
+	// mu/sorted/sortedOK 排序快照（toolgate#122 单源视图 + toolgate#125 构建
+	// 纪律）：首次 Ordered/StrategyPrompt 解析 Info 并缓存，两入口此后同源
+	// （#122：各算一次时两次解析之间 Info（MCP tools/list）瞬时失败翻转 ⇒
+	// 提示词声明顺序与真实工具表分裂）。mutex 兼作读侧初始化的并发安全
+	// （先构建后共享的读契约）。
+	//
+	// 相对 #122 原实现（sync.Once）的两处偏差，均为 #125：
+	//  1. 构建在**解耦 ctx** 上做（context.WithoutCancel）——首读者的
+	//     deadline/cancel 不再传播进 Info 解析，短命请求不污染后续全部读者；
+	//  2. **失败不锁死**：sync.Once 的「一次」与可失败的 IO 初始化天然冲突，
+	//     Info 瞬时错误（网络抖动/文件半写）被冻死 = 快照固定在降级态直到
+	//     进程重启。改为「全部 Info 成功才落快照；有失败则本次视图照常返回
+	//     但不落盘，下次读重试」——成功路径的共享/不重放语义（#122 核心
+	//     保证）原样保留。
+	mu       sync.Mutex
+	sorted   []resolvedEntry
+	sortedOK bool
 }
 
 // NewTable 创建空表。
@@ -73,8 +84,10 @@ func (t *Table) Add(e Entry) *Table {
 		panic("toolprior: Entry.Tool 不能为 nil")
 	}
 	t.entries = append(t.entries, e)
-	t.sortedOnce = sync.Once{} // 零值重置（未并发使用的构建期写入面）
-	t.sorted = nil
+	t.mu.Lock()
+	t.sorted = nil // 重置快照（未并发使用的构建期写入面）
+	t.sortedOK = false
+	t.mu.Unlock()
 	return t
 }
 
@@ -91,39 +104,74 @@ type resolvedEntry struct {
 
 // sortedEntries 统一排序视图（Ordered 与 StrategyPrompt 真共用同一份）：
 // priority 升序 → Info 失败的排末尾 → 同档保持注册序。
-// 首次调用解析 Info 并冻结快照（构建后只读契约的自然延伸），此后重读不再重放
-// Info——两入口读同一份，提示词宣称的顺序与真实工具表顺序才不会在工具元数据
-// 瞬时缺失时互相矛盾（toolgate#122：各算一次时两次解析间成败翻转即分裂）。
+// 首次调用解析 Info 并缓存快照（构建后只读契约的自然延伸），成功建成后重读
+// 不再重放 Info——两入口读同一份，提示词宣称的顺序与真实工具表顺序才不会在
+// 工具元数据瞬时缺失时互相矛盾（toolgate#122：各算一次时两次解析间成败翻转
+// 即分裂）。
+//
+// 两条构建纪律（toolgate#125）：
+//   - **ctx 解耦**：Info 在 context.WithoutCancel(ctx) 上解析——首读者若是
+//     短命请求（带 deadline/cancel），其取消语义只影响他自己那次调用，不冻结
+//     进快照被后续全部读者继承；
+//   - **失败不锁死**：任一 Info 报错 ⇒ 本次视图照常返回（降级态：缺名回退
+//     tool#N、排末尾）但**不落快照**，下次读重试——sync.Once 的「一次」语义
+//     与可失败的 IO 初始化天然冲突，瞬时抖动不该把优先级排序永久降级到进程
+//     重启。全部成功才置 sortedOK（此后与 #122 同：共享、不重放）。
 func (t *Table) sortedEntries(ctx context.Context) []resolvedEntry {
-	t.sortedOnce.Do(func() {
-		rs := make([]resolvedEntry, len(t.entries))
-		for i, e := range t.entries {
-			name := ""
-			if info, err := e.Tool.Info(ctx); err == nil && info.Name != "" {
-				name = info.Name
-			}
-			rs[i] = resolvedEntry{e: e, idx: i, name: name, missing: name == ""}
+	t.mu.Lock()
+	if t.sortedOK {
+		rs := t.sorted
+		t.mu.Unlock()
+		return rs
+	}
+	t.mu.Unlock()
+
+	// 快照构建与调用方 ctx 解耦（#125）：WithoutCancel 保留 ctx 值（trace 等）
+	// 但摘掉 cancel/deadline——Info（MCP tools/list 等）跑在不失效的 ctx 上。
+	buildCtx := context.WithoutCancel(ctx)
+	rs := make([]resolvedEntry, len(t.entries))
+	hadInfoErr := false
+	for i, e := range t.entries {
+		name := ""
+		info, err := e.Tool.Info(buildCtx)
+		if err != nil {
+			hadInfoErr = true
+		} else if info != nil && info.Name != "" {
+			name = info.Name
 		}
-		slices.SortStableFunc(rs, func(a, b resolvedEntry) int {
-			if c := cmp.Compare(a.e.Priority, b.e.Priority); c != 0 {
-				return c
+		rs[i] = resolvedEntry{e: e, idx: i, name: name, missing: name == ""}
+	}
+	slices.SortStableFunc(rs, func(a, b resolvedEntry) int {
+		if c := cmp.Compare(a.e.Priority, b.e.Priority); c != 0 {
+			return c
+		}
+		if a.missing != b.missing {
+			if a.missing {
+				return 1 // Info 失败的排末尾，不遮挡可用工具
 			}
-			if a.missing != b.missing {
-				if a.missing {
-					return 1 // Info 失败的排末尾，不遮挡可用工具
-				}
-				return -1
-			}
-			return cmp.Compare(a.idx, b.idx)
-		})
-		t.sorted = rs
+			return -1
+		}
+		return cmp.Compare(a.idx, b.idx)
 	})
+
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if hadInfoErr {
+		if t.sortedOK {
+			// 并发竞态：另一读者已建成成功视图——共享它，不回退到本次降级视图。
+			return t.sorted
+		}
+		return rs // 失败不落快照：本次照常返回，下次读重试（#125）
+	}
+	t.sorted = rs
+	t.sortedOK = true
 	return t.sorted
 }
 
 // Ordered 按优先级稳定排序返回工具表（同优先级保持注册序）。
 // Info 失败的条目在本优先级档内排后（跨档仍按优先级——与 StrategyPrompt 共用
-// 首读冻结的同一份视图，toolgate#122）（排序键不可得时不遮挡可用工具）。
+// 首读缓存的同一份视图，toolgate#122；瞬时失败不冻死、下次读重试，
+// toolgate#125）（排序键不可得时不遮挡可用工具）。
 func (t *Table) Ordered(ctx context.Context) []tool.BaseTool {
 	rs := t.sortedEntries(ctx)
 	out := make([]tool.BaseTool, 0, len(rs))
@@ -134,7 +182,8 @@ func (t *Table) Ordered(ctx context.Context) []tool.BaseTool {
 }
 
 // StrategyPrompt 渲染"工具使用策略"提示词段（按优先级序，与 Ordered 共用首读
-// 冻结的同一份视图——提示词声明顺序即真实工具表顺序，toolgate#122）。
+// 缓存的同一份视图——提示词声明顺序即真实工具表顺序，toolgate#122；瞬时失败
+// 不冻死、下次读重试，toolgate#125）。
 // 空表返回空串。调用方拼进 agent instruction。
 func (t *Table) StrategyPrompt(ctx context.Context) string {
 	if len(t.entries) == 0 {
