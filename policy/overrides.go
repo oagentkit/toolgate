@@ -65,6 +65,14 @@ func LoadOverrides(fsys fs.FS, path string) (*Policy, error) {
 	if err != nil {
 		return nil, err
 	}
+	// 模式档位有序性（oagentkit/toolgate#134）：两档是有序档位（DefaultPolicy
+	// 「auto 代批至 L2、full 代批至 L3（L4 恒人工双确认）」），ModeFull 的语义
+	// 是完全访问——auto > full 时切到 full 反而比 auto 更严（档位静默倒挂），
+	// 单键逐项校验（非负/不超基座）看不到跨键关系。fail-fast 启动即败；
+	// auto == full 不拦截（合法配置：两档代批面一致，语义塌缩但方向保守）。
+	if auto > full {
+		return nil, fmt.Errorf("policy: %s 模式档位倒挂：auto_max_risk=%d 不得大于 full_max_risk=%d（ModeFull 的代批面必须 ≥ ModeAuto，倒挂=切到 full 反而更多升人审）", path, auto, full)
+	}
 	// 规则逐条校验（第十轮挂账：运行期 fail-safe 兜底之外，加载期对漏写/
 	// 拼错的 verdict fail-fast——启动即败，宁拒不启动不带错跑的既定纪律；
 	// op_types 同纪律 oagentkit/toolgate#133：封闭词表拼错即规则永失配，
