@@ -312,6 +312,19 @@ func isValidVerdict(v Verdict) bool {
 	return false
 }
 
+// isValidOpType 例外规则 op_types 合法域（oagentkit/toolgate#133）：OpType 是
+// 封闭词表，拼错（toolcall / ToolCall / execute-step …）在运行期表现为
+// slices.Contains 永假、规则对所有操作永失配——deny 规则因此变静默死字
+// （fail-open，#86 点名的「deny 最坏失效形态」在 op_types 字段的复现），与
+// verdict 拼错同款失效形态。加载期 fail-fast 同一纪律。
+func isValidOpType(s string) bool {
+	switch OpType(s) {
+	case OpToolCall, OpExecuteStep, OpPlanSubmit:
+		return true
+	}
+	return false
+}
+
 // verdictDisposition 裁决→执行处置的唯一映射单源（oagentkit/toolgate#53）：
 // AuditGate 装饰器与 Stage 适配器都必须经它取放行/拒绝结论，谁也不许再自写
 // 一份 if/switch——#40 的教训正是两条判定路径各判各的，一面修了/漏修了另一面

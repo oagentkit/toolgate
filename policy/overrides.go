@@ -66,11 +66,19 @@ func LoadOverrides(fsys fs.FS, path string) (*Policy, error) {
 		return nil, err
 	}
 	// 规则逐条校验（第十轮挂账：运行期 fail-safe 兜底之外，加载期对漏写/
-	// 拼错的 verdict fail-fast——启动即败，宁拒不启动不带错跑的既定纪律）
+	// 拼错的 verdict fail-fast——启动即败，宁拒不启动不带错跑的既定纪律；
+	// op_types 同纪律 oagentkit/toolgate#133：封闭词表拼错即规则永失配，
+	// deny 变静默死字（fail-open），与 verdict 拼错同款失效形态）
 	for i, r := range p.Rules {
 		if r.Verdict != VerdictUnknown && !isValidVerdict(r.Verdict) {
 			return nil, fmt.Errorf("policy: %s 规则[%d]（%s）verdict %q 非法（auto_proceed|need_human|deny|plan_only|unknown）",
 				path, i, r.ID, r.Verdict)
+		}
+		for _, ot := range r.OpTypes {
+			if !isValidOpType(ot) {
+				return nil, fmt.Errorf("policy: %s 规则[%d]（%s）op_types %q 非法（tool_call|execute_step|plan_submit）——拼错即规则永失配（deny 变静默死字），启动即败（#133）",
+					path, i, r.ID, ot)
+			}
 		}
 		if r.ID == "" {
 			return nil, fmt.Errorf("policy: %s 规则[%d] 缺 id", path, i)
