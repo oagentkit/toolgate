@@ -20,7 +20,8 @@ func TestCanRunInParallelDecisionChain(t *testing.T) {
 		c    Call
 		want bool
 	}{
-		{"匿名无声明→并行", Call{ID: "1"}, true},
+		{"匿名无声明→保守不并行（toolgate#136：与具名同侧）", Call{ID: "1"}, false},
+		{"匿名声明 readOnly→放行", Call{ID: "1", Hints: Hints{ReadOnly: b(true)}}, true},
 		{"destructive 否决", Call{ID: "1", Name: "rm", Hints: Hints{Destructive: b(true), ReadOnly: b(true)}}, false},
 		{"idempotent 显式优先于 readOnly=false", Call{ID: "1", Name: "x", Hints: Hints{Idempotent: b(true), ReadOnly: b(false)}}, true},
 		{"idempotent=false 不并行", Call{ID: "1", Name: "x", Hints: Hints{Idempotent: b(false), ReadOnly: b(true)}}, false},
@@ -129,14 +130,16 @@ func TestScheduleErrors(t *testing.T) {
 }
 
 func TestExecuteConcurrentParallelGroup(t *testing.T) {
-	// 3 个并行任务各等齐另两个（barrier 语义）——串行执行会死锁超时
+	// 3 个并行任务各等齐另两个（barrier 语义）——串行执行会死锁超时。
+	// 显式声明 idempotent（toolgate#136：匿名未声明已改保守不并行——
+	// 并行能力的验证用显式注解表达，不再依赖缺省翻向）
 	var running, peak int32
 	var mu sync.Mutex
 	release := make(chan struct{})
 	s := &Scheduler{}
 	tasks := make([]Task, 3)
 	for i := range tasks {
-		tasks[i] = Task{Call: Call{ID: string(rune('a' + i))}, Run: func(ctx context.Context) (string, error) {
+		tasks[i] = Task{Call: Call{ID: string(rune('a' + i)), Hints: Hints{Idempotent: b(true)}}, Run: func(ctx context.Context) (string, error) {
 			cur := atomic.AddInt32(&running, 1)
 			mu.Lock()
 			if cur > peak {

@@ -2,9 +2,9 @@
 // 调度——依赖就绪即跑、并发受上限约束、独占任务不与他人并发。
 //
 // 对标 ZCode tool/scheduler.ts + executor/batch-runner.ts：并发判定由注解驱动
-// （destructive 一票否决 → concurrentSafe 显式优先 → readOnly 次之 → 具名未声明
-// 保守不并行）；注解生产面见 mcp.ToolHints（tools/list 注解归一），本包只消费
-// 同构的 Hints 三态声明，不依赖 MCP。
+// （destructive 一票否决 → concurrentSafe 显式优先 → readOnly 次之 → 未声明
+// 保守不并行——匿名与具名同侧，toolgate#136）；注解生产面见 mcp.ToolHints
+// （tools/list 注解归一），本包只消费同构的 Hints 三态声明，不依赖 MCP。
 //
 // 失败不阻断后续：前序非并发安全工具的本地失败（如 todo 写盘）不应误截断
 // 后续任务的执行——后续任务的去留由其自身的执行结果与调用方取消信号决定。
@@ -115,16 +115,25 @@ func (s *Scheduler) maxConcurrency() int {
 }
 
 // canRunInParallel 并发判定（对标 ZCode canRunInParallel 决策链）：
-// 无名且无任何注解声明 → 并行（匿名无从判定）；destructive → 否决；
-// idempotent 显式优先（≈ZCode concurrentSafe）；readOnly → 放行；
-// 具名未声明 → 查 ReadOnlyTools 兜底表，缺省保守不并行。
+// 未声明任何注解 → 保守不并行——匿名与具名同侧（toolgate#136：此前两面取
+// 相反方向，具名查兜底表缺省不并行、匿名 return true，「注解缺失取保守侧」
+// 的包级判定原则在匿名面破例且无解释）；destructive → 否决；
+// idempotent 显式优先（≈ZCode concurrentSafe）；readOnly → 放行。
+//
+// 匿名 + 未声明的调用恰是**没走正规注册面**的调用（内部编排直造、模型侧
+// 透传），最可能缺注解也最可能破坏性——并发安全面按「未知」处置：确有
+// 「匿名必并行」的宿主场景，走显式注解（Idempotent/ReadOnly 三态声明）
+// 而不是缺省翻向。
 func (s *Scheduler) canRunInParallel(c Call) bool {
 	if c.StopAfter {
 		return false // 停轮门独占组
 	}
 	declared := c.Hints.ReadOnly != nil || c.Hints.Idempotent != nil || c.Hints.Destructive != nil
-	if c.Name == "" && !declared {
-		return true
+	if !declared {
+		// 未声明 = 未知 = 保守不并行（toolgate#136）：具名查 ReadOnlyTools
+		// 兜底表（缺省 false）；匿名空名查不到 → 同样 false——两面同侧，
+		// 兜底表路径原样保留
+		return s.ReadOnlyTools[c.Name]
 	}
 	if b := c.Hints.Destructive; b != nil && *b {
 		return false
