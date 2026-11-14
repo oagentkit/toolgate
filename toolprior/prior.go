@@ -25,6 +25,7 @@ import (
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/schema"
 
+	"github.com/oagentkit/guardx/fence"
 	"github.com/oagentkit/mcpkit/mcp"
 )
 
@@ -185,6 +186,12 @@ func (t *Table) Ordered(ctx context.Context) []tool.BaseTool {
 // 缓存的同一份视图——提示词声明顺序即真实工具表顺序，toolgate#122；瞬时失败
 // 不冻死、下次读重试，toolgate#125）。
 // 空表返回空串。调用方拼进 agent instruction。
+//
+// 攻击者可影响字段消毒（toolgate#135）：Info().Name 对 MCP 工具是服务端可影响
+// 字段（被攻陷/敌意 server 注册怪名工具），When/Cost 可来自外部配置——原样拼
+// 进提示词段，内嵌换行即可插入顶格伪指令行（混入 instruction 的「系统注入」
+// 版式）。渲染前全部过 sanitizePromptFragment（换行折叠单行 + fence 结构中和），
+// 与 tools websearch #49/#63、guardx fence 同族口径。
 func (t *Table) StrategyPrompt(ctx context.Context) string {
 	if len(t.entries) == 0 {
 		return ""
@@ -199,15 +206,26 @@ func (t *Table) StrategyPrompt(ctx context.Context) string {
 		var parts []string
 		parts = append(parts, fmt.Sprintf("priority=%d", r.e.Priority))
 		if r.e.Cost != "" {
-			parts = append(parts, "cost="+r.e.Cost)
+			parts = append(parts, "cost="+sanitizePromptFragment(r.e.Cost))
 		}
 		if r.e.When != "" {
-			parts = append(parts, r.e.When)
+			parts = append(parts, sanitizePromptFragment(r.e.When))
 		}
-		fmt.Fprintf(&b, "- %s（%s）\n", name, strings.Join(parts, "；"))
+		fmt.Fprintf(&b, "- %s（%s）\n", sanitizePromptFragment(name), strings.Join(parts, "；"))
 	}
 	b.WriteString("原则：先用优先级数值小的工具取得基础证据；优先级数值大的外部工具（有网络/进程开销）仅在本地信息不足时调用，避免不必要的外部开销。")
 	return b.String()
+}
+
+// sanitizePromptFragment 提示词片段消毒（toolgate#135）：换行/行终止符折叠为
+// 单行（strings.Fields 单行化——列表项字段内嵌换行即伪造顶格行/伪条目），
+// 再经 guardx/fence.EscapeUntrusted 中和行首结构字符（标题/引用/表格/分隔线）
+// ——fence 同族口径：承重内容保留原样，结构位中和。
+func sanitizePromptFragment(s string) string {
+	if s == "" {
+		return ""
+	}
+	return fence.EscapeUntrusted(strings.Join(strings.Fields(s), " "))
 }
 
 // limitedTool 调用次数受限的工具包装（原子计数，并发安全）。
