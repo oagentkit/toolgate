@@ -234,6 +234,16 @@ func (g *Gate) Decide(ctx context.Context, op Op) Decision {
 		if v != VerdictAuto && v != VerdictNeedHuman && v != VerdictDeny {
 			return Decision{Verdict: VerdictNeedHuman, Decider: DeciderRule, RuleID: r.ID, Reason: "仲裁输出非法，fail-safe 升人审"}
 		}
+		// 未评级（Risk=0）的方案不得被仲裁面代批（oagentkit/toolgate#132）：
+		// #99 的守卫只堵了规则面（Rule.matches），unknown 规则走仲裁的返回值
+		// 没有同款守卫——仲裁器回 auto_proceed 时未评级方案直接代批，「未评级
+		// 不代批」在规则面/矩阵面之外的第三面被绕过。仲裁器通常是 LLM 插件而非
+		// 人，其 auto 即系统代批：代批=系统为风险背书，风险未知的方案不得代批
+		// ——三面一个口径。
+		if v == VerdictAuto && op.Type == OpPlanSubmit && op.Risk == 0 {
+			return Decision{Verdict: VerdictNeedHuman, Decider: DeciderRule, RuleID: r.ID,
+				Reason: "未评级不代批（Risk=0），仲裁面与规则/矩阵面同口径 fail-closed: " + reason}
+		}
 		return Decision{Verdict: v, Decider: DeciderLLM, RuleID: r.ID, Reason: reason}
 	}
 	switch op.Type {
