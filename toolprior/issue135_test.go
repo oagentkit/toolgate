@@ -44,7 +44,7 @@ func TestStrategyPromptNewlineInjection_Issue135(t *testing.T) {
 }
 
 // TestStrategyPromptLegitFieldsUnharmed_Issue135 对照：正常名/When 渲染不变
-//（含中文指引与空格），消毒不误伤承重内容。
+// （含中文指引与空格），消毒不误伤承重内容。
 func TestStrategyPromptLegitFieldsUnharmed_Issue135(t *testing.T) {
 	ctx := context.Background()
 	table := NewTable().
