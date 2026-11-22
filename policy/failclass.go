@@ -4,7 +4,7 @@ package policy
 //
 // # 两套分类各答什么
 //
-//	|                        | `mcpkit/mcp.ErrorKind` | `guardx/toolfail.Class` |
+//	|                        | `mcpkit/iface.ErrorKind` | `guardx/toolfail.Class` |
 //	|------------------------|------------------------|-------------------------|
 //	| 判什么                 | 协议层**事实**          | 处置层**语义**           |
 //	| 取值                   | unreachable / protocol / tool_missing / invalid_args / unknown | transient / permanent / authentication / not_found / permission_denied / invalid_argument / rate_limited / self_reported / unknown |
@@ -25,7 +25,7 @@ package policy
 //
 // # 映射的取舍：两层结论不一致时取不可重试的一侧
 //
-// `mcp.ErrorKind.Retryable()` 对 KindProtocol 返回 **true**（server 短暂异常时重试可能
+// `iface.ErrorKind.Retryable()` 对 KindProtocol 返回 **true**（server 短暂异常时重试可能
 // 恢复），而映射后是 `toolfail.ClassPermanent`（不可重试）。两者问的不是同一个问题
 // （协议层问「重试有没有可能恢复」，处置层问「原样重试有没有意义」），但映射只能给
 // 一个答案，故取**保守的一侧**：误判可重试是把一次失败放大成 N 次，还可能重复施加
@@ -43,29 +43,29 @@ import (
 	"errors"
 
 	"github.com/oagentkit/guardx/toolfail"
-	"github.com/oagentkit/mcpkit/mcp"
+	"github.com/oagentkit/mcpkit/iface"
 )
 
 // failureClassTable 协议层分类 → 处置层类别（单源）。
 //
 // 改这里必然改到契约测试 TestFailureClassCoversEveryErrorKind。
-var failureClassTable = map[mcp.ErrorKind]toolfail.Class{
+var failureClassTable = map[iface.ErrorKind]toolfail.Class{
 	// 连不上（网络/进程层）：稍后多半恢复 → 可重试 + 退避。
 	// 对上 toolfail 的 ClassTransient：它的 SafeToResubmit 为 false——超时的定义
 	// 就是「不知道对方执行到哪」，把它当成安全重发是把一次调用放大成两次。
-	mcp.KindUnreachable: toolfail.ClassTransient,
+	iface.KindUnreachable: toolfail.ClassTransient,
 
 	// 协议错：server 实现不合规或版本不匹配，重试多半无效 → 不可重试。
-	mcp.KindProtocol: toolfail.ClassPermanent,
+	iface.KindProtocol: toolfail.ClassPermanent,
 
 	// 工具不存在：配置/契约问题，重试不创造对象 → 不可重试。
-	mcp.KindToolMissing: toolfail.ClassNotFound,
+	iface.KindToolMissing: toolfail.ClassNotFound,
 
 	// 参数错：改调用方才有用，原样重发必然复现 → 不可重试。
-	mcp.KindInvalidArgs: toolfail.ClassInvalidArgument,
+	iface.KindInvalidArgs: toolfail.ClassInvalidArgument,
 
 	// 未归类：不可分类 = 不可重试（与 toolfail 的保守缺省一致）。
-	mcp.KindUnknown: toolfail.ClassUnknown,
+	iface.KindUnknown: toolfail.ClassUnknown,
 }
 
 // FailureClass 协议层分类 → 处置层类别。
@@ -74,7 +74,7 @@ var failureClassTable = map[mcp.ErrorKind]toolfail.Class{
 //
 // 未登记的分类（含零值与越界值）一律回落 ClassUnknown——不可分类 = 不可重试，
 // 不给「查不到就乐观」留口子。
-func FailureClass(kind mcp.ErrorKind) toolfail.Class {
+func FailureClass(kind iface.ErrorKind) toolfail.Class {
 	if c, ok := failureClassTable[kind]; ok {
 		return c
 	}
@@ -104,5 +104,5 @@ func Disposition(err error) toolfail.Class {
 	if errors.As(err, &reporter) && !reporter.Retryable() {
 		return toolfail.ClassUnknown
 	}
-	return FailureClass(mcp.ClassifyError(err))
+	return FailureClass(iface.KindOf(err))
 }
