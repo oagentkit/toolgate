@@ -26,7 +26,7 @@ import (
 	"github.com/cloudwego/eino/schema"
 
 	"github.com/oagentkit/guardx/fence"
-	"github.com/oagentkit/mcpkit/mcp"
+	"github.com/oagentkit/mcpkit/iface"
 )
 
 // 优先级档位（数值越小越优先；自定义档位可插在中间）。
@@ -259,15 +259,15 @@ func (l *limitedTool) Info(ctx context.Context) (*schema.ToolInfo, error) {
 // 内层非 RawNamer 返回空串（同 mcpkit selfHealTool 写法：空串=无原始名可用，
 // 消费方不得据此放行）。
 func (l *limitedTool) RawToolName() string {
-	if rn, ok := l.inner.(mcp.RawNamer); ok {
+	if rn, ok := l.inner.(iface.RawNamer); ok {
 		return rn.RawToolName()
 	}
 	return ""
 }
 
-// OutputSchema 出参 schema 透传（v0.12.5 OutputSchemer 可选能力面，mcp.OutputSchemaOf）。
+// OutputSchema 出参 schema 透传（v0.12.5 OutputSchemer 可选能力面，iface.OutputSchemaOf）。
 func (l *limitedTool) OutputSchema() json.RawMessage {
-	if o, ok := l.inner.(mcp.OutputSchemer); ok {
+	if o, ok := l.inner.(iface.OutputSchemer); ok {
 		return o.OutputSchema()
 	}
 	return nil

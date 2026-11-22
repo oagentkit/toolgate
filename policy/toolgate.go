@@ -7,7 +7,7 @@ import (
 
 	"github.com/cloudwego/eino/components/tool"
 
-	"github.com/oagentkit/mcpkit/mcp"
+	"github.com/oagentkit/mcpkit/iface"
 )
 
 // PolicyRejectedPrefix 审计门拒绝观察文本的稳定前缀（oagentkit/toolgate#72）。
@@ -78,7 +78,7 @@ func AuditGate(g *Gate, op Op, onAudit func(Op, Decision), t tool.InvokableTool)
 // （动词启发式/只读白名单/审计归类）静默拿到带命名空间的暴露名。内层非 RawNamer
 // 返回空串（同 mcpkit selfHealTool 写法：空串=无原始名可用，消费方不得据此放行）。
 func (t auditTool) RawToolName() string {
-	if rn, ok := t.InvokableTool.(mcp.RawNamer); ok {
+	if rn, ok := t.InvokableTool.(iface.RawNamer); ok {
 		return rn.RawToolName()
 	}
 	return ""
@@ -86,7 +86,7 @@ func (t auditTool) RawToolName() string {
 
 // OutputSchema 出参 schema 透传（v0.12.5 OutputSchemer 可选能力面）。
 func (t auditTool) OutputSchema() json.RawMessage {
-	if o, ok := t.InvokableTool.(mcp.OutputSchemer); ok {
+	if o, ok := t.InvokableTool.(iface.OutputSchemer); ok {
 		return o.OutputSchema()
 	}
 	return nil

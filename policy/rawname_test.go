@@ -5,11 +5,12 @@ package policy
 // 自家层，跨仓堆叠后最外层取 RawToolName 的组合此前无人测，断链正是从这里漏掉）。
 
 import (
+	"context"
 	"testing"
 
 	"github.com/cloudwego/eino/components/tool"
 
-	"github.com/oagentkit/mcpkit/mcp"
+	"github.com/oagentkit/mcpkit/iface"
 	"github.com/oagentkit/toolgate/toolprior"
 )
 
@@ -22,7 +23,7 @@ type rawNamedTool struct {
 
 func (f *rawNamedTool) RawToolName() string { return f.raw }
 
-var _ mcp.RawNamer = (*rawNamedTool)(nil)
+var _ iface.RawNamer = (*rawNamedTool)(nil)
 
 // TestAuditGateRawToolNamePassthrough（toolgate#73）：auditTool 包装层透传原始
 // 工具名——宿主自然堆叠 invokableTool → AuditGate → 模型时最外层是本包装，此前
@@ -32,14 +33,14 @@ func TestAuditGateRawToolNamePassthrough(t *testing.T) {
 	inner := &rawNamedTool{fakeTool: fakeTool{name: "srv.search_docs"}, raw: "search_docs"}
 	wrapped := AuditGate(NewGate(nil, nil),
 		Op{Type: OpToolCall, Mode: ModeAuto, Tool: "search_docs"}, nil, inner)
-	if got := mcp.RawToolNameOf(wrapped); got != "search_docs" {
+	if got := rawNameOfForTest(wrapped); got != "search_docs" {
 		t.Fatalf("包装后最外层应取到原始名，got %q（want search_docs）", got)
 	}
 	// 内层非 RawNamer：空串=无原始名可用（同 mcpkit selfHealTool 契约；不得谎报
 	// 暴露名为原始名，消费方对空串不得放行）。
 	plain := AuditGate(NewGate(nil, nil),
 		Op{Type: OpToolCall, Mode: ModeAuto, Tool: "get_x"}, nil, &fakeTool{name: "get_x"})
-	if got := mcp.RawToolNameOf(plain); got != "" {
+	if got := rawNameOfForTest(plain); got != "" {
 		t.Fatalf("内层非 RawNamer 应返回空串，got %q", got)
 	}
 }
@@ -53,14 +54,27 @@ func TestRawToolNameAcrossWrappedStack(t *testing.T) {
 		Op{Type: OpToolCall, Mode: ModeAuto, Tool: "search_docs"}, nil, inner)
 	// 堆叠序一：AuditGate 在内、LimitCalls 在外（issue 描述的自然形态）。
 	outer := toolprior.LimitCalls(audit, 3)
-	if got := mcp.RawToolNameOf(outer); got != "search_docs" {
+	if got := rawNameOfForTest(outer); got != "search_docs" {
 		t.Fatalf("AuditGate→LimitCalls 堆叠后最外层应取到原始名，got %q", got)
 	}
 	// 堆叠序二：LimitCalls 在内、AuditGate 在外。
 	outer2 := AuditGate(NewGate(nil, nil),
 		Op{Type: OpToolCall, Mode: ModeAuto, Tool: "search_docs"}, nil,
 		toolprior.LimitCalls(inner, 3).(tool.InvokableTool))
-	if got := mcp.RawToolNameOf(outer2); got != "search_docs" {
+	if got := rawNameOfForTest(outer2); got != "search_docs" {
 		t.Fatalf("LimitCalls→AuditGate 堆叠后最外层应取到原始名，got %q", got)
 	}
+}
+
+// rawNameOfForTest RawToolNameOf 的测试局部等价（mcp.RawToolNameOf 要 inspect
+// eino ToolInfo——本测试只验「包装层断言透传」，fallback 分支本地复刻，避免
+// 测试依赖把 mcp-go 拖回本仓模块图）。
+func rawNameOfForTest(t tool.BaseTool) string {
+	if rn, ok := t.(iface.RawNamer); ok {
+		return rn.RawToolName()
+	}
+	if info, err := t.Info(context.Background()); err == nil && info != nil {
+		return info.Name
+	}
+	return ""
 }
