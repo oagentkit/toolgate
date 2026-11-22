@@ -11,7 +11,7 @@ import (
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/schema"
 
-	"github.com/oagentkit/mcpkit/mcp"
+	"github.com/oagentkit/mcpkit/iface"
 )
 
 // rawNamedTool 带 RawToolName 的工具替身（模拟 mcp.Pool 出口工具：暴露名带
@@ -23,7 +23,7 @@ type rawNamedTool struct {
 
 func (f *rawNamedTool) RawToolName() string { return f.raw }
 
-var _ mcp.RawNamer = (*rawNamedTool)(nil)
+var _ iface.RawNamer = (*rawNamedTool)(nil)
 
 // fakeTool 假工具。
 type fakeTool struct {
@@ -166,13 +166,13 @@ func TestWithCallLimitZero(t *testing.T) {
 func TestLimitCallsRawToolNamePassthrough(t *testing.T) {
 	inner := &rawNamedTool{fakeTool: &fakeTool{name: "srv.search_docs"}, raw: "search_docs"}
 	limited := LimitCalls(inner, 2)
-	if got := mcp.RawToolNameOf(limited); got != "search_docs" {
+	if got := rawNameOfForTest(limited); got != "search_docs" {
 		t.Fatalf("包装后最外层应取到原始名，got %q（want search_docs）", got)
 	}
 	// 内层非 RawNamer：空串=无原始名可用（同 mcpkit selfHealTool 契约；不得
 	// 谎报暴露名为原始名，消费方对空串不得放行）。
 	plain := LimitCalls(&fakeTool{name: "get_x"}, 2)
-	if got := mcp.RawToolNameOf(plain); got != "" {
+	if got := rawNameOfForTest(plain); got != "" {
 		t.Fatalf("内层非 RawNamer 应返回空串，got %q", got)
 	}
 }
@@ -386,4 +386,17 @@ func TestSnapshotBuildDecoupledFromCallerCtx(t *testing.T) {
 	if lines := promptToolLines(tb.StrategyPrompt(context.Background())); !slices.Equal(lines, []string{"alpha", "aware"}) {
 		t.Fatalf("健康读者视图: %v", lines)
 	}
+}
+
+// rawNameOfForTest RawToolNameOf 的测试局部等价（mcp.RawToolNameOf 要 inspect
+// eino ToolInfo——本测试只验「包装层断言透传」这一行为，fallback 分支用本地
+// 复刻，避免测试依赖把 mcp-go 拖回模块图）。
+func rawNameOfForTest(t tool.BaseTool) string {
+	if rn, ok := t.(iface.RawNamer); ok {
+		return rn.RawToolName()
+	}
+	if info, err := t.Info(context.Background()); err == nil && info != nil {
+		return info.Name
+	}
+	return ""
 }

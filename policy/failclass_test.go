@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/oagentkit/guardx/toolfail"
-	"github.com/oagentkit/mcpkit/mcp"
+	"github.com/oagentkit/mcpkit/iface"
 )
 
 // TestFailureClassMapping 映射表的逐条断言。
@@ -14,14 +14,14 @@ import (
 // 这张表是「协议层事实 → 处置层语义」的唯一转换点，改它必须改这里。
 func TestFailureClassMapping(t *testing.T) {
 	cases := []struct {
-		kind mcp.ErrorKind
+		kind iface.ErrorKind
 		want toolfail.Class
 	}{
-		{mcp.KindUnreachable, toolfail.ClassTransient},
-		{mcp.KindProtocol, toolfail.ClassPermanent},
-		{mcp.KindToolMissing, toolfail.ClassNotFound},
-		{mcp.KindInvalidArgs, toolfail.ClassInvalidArgument},
-		{mcp.KindUnknown, toolfail.ClassUnknown},
+		{iface.KindUnreachable, toolfail.ClassTransient},
+		{iface.KindProtocol, toolfail.ClassPermanent},
+		{iface.KindToolMissing, toolfail.ClassNotFound},
+		{iface.KindInvalidArgs, toolfail.ClassInvalidArgument},
+		{iface.KindUnknown, toolfail.ClassUnknown},
 	}
 	for _, c := range cases {
 		if got := FailureClass(c.kind); got != c.want {
@@ -40,7 +40,7 @@ func TestFailureClassMapping(t *testing.T) {
 // 若将来改成非连续赋值，须同步扩大本区间并更新本注释。
 func TestFailureClassCoversEveryErrorKind(t *testing.T) {
 	for i := 0; i < 64; i++ {
-		kind := mcp.ErrorKind(i)
+		kind := iface.ErrorKind(i)
 		if kind.String() == "unknown" {
 			continue // KindUnknown 与越界值都归到 "unknown"
 		}
@@ -54,7 +54,7 @@ func TestFailureClassCoversEveryErrorKind(t *testing.T) {
 //
 // 不可分类 = 不可重试：误判可重试是把一次失败放大成 N 次，还可能重复施加副作用。
 func TestFailureClassUnmappedIsNotRetryable(t *testing.T) {
-	got := FailureClass(mcp.ErrorKind(99))
+	got := FailureClass(iface.ErrorKind(99))
 	if got != toolfail.ClassUnknown {
 		t.Fatalf("越界分类映射成 %q，期望 %q", got, toolfail.ClassUnknown)
 	}
@@ -69,10 +69,10 @@ func TestFailureClassUnmappedIsNotRetryable(t *testing.T) {
 // 但映射只能给一个答案——取保守的一侧。这条把取舍钉住：若上游哪天改了
 // ErrorKind.Retryable 的口径，本测试会先红，逼着重新论证而不是悄悄漂移。
 func TestFailureClassTakesConservativeSide(t *testing.T) {
-	if !mcp.KindProtocol.Retryable() {
+	if !iface.KindProtocol.Retryable() {
 		t.Fatal("前提变了：协议层不再认为 protocol 可重试，取舍依据需重新论证")
 	}
-	if toolfail.PolicyOf(FailureClass(mcp.KindProtocol)).Retryable {
+	if toolfail.PolicyOf(FailureClass(iface.KindProtocol)).Retryable {
 		t.Fatal("protocol 必须映射成不可重试的类别（保守侧）")
 	}
 }
@@ -81,7 +81,7 @@ func TestFailureClassTakesConservativeSide(t *testing.T) {
 //
 // 这是超时类失败最要紧的一条：可重试却可能已经生效，原样重发即重复施加副作用。
 func TestFailureClassUnreachableIsRetryableButNotResubmittable(t *testing.T) {
-	p := toolfail.PolicyOf(FailureClass(mcp.KindUnreachable))
+	p := toolfail.PolicyOf(FailureClass(iface.KindUnreachable))
 	if !p.Retryable {
 		t.Fatal("连不上必须可重试")
 	}
