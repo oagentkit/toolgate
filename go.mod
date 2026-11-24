@@ -13,7 +13,11 @@ require (
 
 require (
 	github.com/kr/pretty v0.3.1 // indirect
+<<<<<<< HEAD
 	github.com/oekit/pkg v0.61.1 // indirect
+=======
+	github.com/oekit/pkg v0.61.2 // indirect
+>>>>>>> ce88783 (build: 依赖地板对齐——pkg → v0.61.2)
 	github.com/rogpeppe/go-internal v1.14.1 // indirect
 	github.com/stretchr/testify v1.11.1 // indirect
 	gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c // indirect
