@@ -78,13 +78,7 @@ github.com/oagentkit/mcpkit v0.15.0 h1:aZ9Bvfm2mC3IW6GFCtmDXS4FOXjmIAOQeaDrD5XyL
 github.com/oagentkit/mcpkit v0.15.0/go.mod h1:vVxR4wQABq0J1GZY4dyEZJiPr+AzBnCIe5r7wUpmpH0=
 github.com/oekit/concurrency v0.40.0 h1:gFwginpsVXdY4R/hzwicyBa2u1WHmCN1h5Bw6ztlpBw=
 github.com/oekit/concurrency v0.40.0/go.mod h1:nnPMxDuUq8H9ZrqhsRpGY2n1FMAL0Jio2MZRPKlPeJo=
-<<<<<<< HEAD
-github.com/oekit/pkg v0.61.1 h1:vJtwzIvkiMv5Xu9m1u6mglcw1sMiDJnPL7kzK8iEIlY=
-github.com/oekit/pkg v0.61.1/go.mod h1:Cr6sJpBX2a0gAIgLa32+NY69h/UZtuN6L1ZdXtP9upo=
-=======
 github.com/oekit/pkg v0.61.2 h1:QvD2SHz6AB4esg+tneqZUwCszY5H/Zku5smCXMvRQpc=
-github.com/oekit/pkg v0.61.2/go.mod h1:Cr6sJpBX2a0gAIgLa32+NY69h/UZtuN6L1ZdXtP9upo=
->>>>>>> ce88783 (build: 依赖地板对齐——pkg → v0.61.2)
 github.com/onsi/ginkgo v1.6.0/go.mod h1:lLunBs/Ym6LB5Z9jYTR76FiuTmxDTDusOGeTQH+WWjE=
 github.com/onsi/ginkgo v1.8.0/go.mod h1:lLunBs/Ym6LB5Z9jYTR76FiuTmxDTDusOGeTQH+WWjE=
 github.com/onsi/gomega v1.5.0/go.mod h1:ex+gbHU/CVuBBDIJjb2X0qEXbFg53c61hWP/1CpauHY=
